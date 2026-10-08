@@ -38,14 +38,20 @@ function writeClaude(config, change) {
   change(config.mcpServers);
   writeFileSync(claudeConfig, JSON.stringify(config, null, 2) + '\n');
 }
-// Claude Code keeps its own list. Without the claude command, print what to run instead.
+// Claude Code keeps its own list. npm installs claude as a .cmd file on Windows, which needs a shell.
+const win = process.platform === 'win32';
+const claudeCli = args => spawnSync('claude', win ? args.map(a => `"${a}"`) : args, {shell: win, encoding: 'utf8'});
+// Quoted for the shell the user has: PowerShell on Windows, sh/zsh elsewhere.
+const quote = a => win ? `'${a.replaceAll("'", "''")}'` : `'${a.replaceAll("'", `'\\''`)}'`;
 function claudeCode(key, add) {
   const [name, file] = servers[key];
-  spawnSync('claude', ['mcp', 'remove', '--scope', 'user', name], {stdio: 'ignore'});
+  const removal = ['mcp', 'remove', '--scope', 'user', name], removed = claudeCli(removal);
+  const absent = removed.error || /No MCP server named|not recognized/.test(removed.stdout + removed.stderr);
+  if (removed.status !== 0 && !absent) console.log(`Could not remove ${name} from Claude Code. Run: claude ${removal.map(quote).join(' ')}`);
   if (!add) return;
   const args = ['mcp', 'add', '--scope', 'user', name, '--', node, file];
-  if (spawnSync('claude', args, {stdio: 'ignore'}).status === 0) console.log(`Added ${name} to Claude Code.`);
-  else console.log(`To use it in Claude Code too, run: claude ${args.map(a => JSON.stringify(a)).join(' ')}`);
+  if (claudeCli(args).status === 0) console.log(`Added ${name} to Claude Code.`);
+  else console.log(`To use it in Claude Code too, run: claude ${args.map(quote).join(' ')}`);
 }
 function register(config, key) {
   writeClaude(config, s => { s[servers[key][0]] = {command: node, args: [servers[key][1]]}; });
@@ -91,8 +97,8 @@ Next:
   rmSync(bridgeFile, {force: true});
   const { revoke } = await import('./chat/auth.mjs');
   const revoked = await revoke();
-  console.log(revoked ? '\nRemoved both connectors from Claude, deleted the local keys and cancelled the Google Chat sign-in.'
-    : '\nRemoved both connectors from Claude and deleted the Gmail key.\n' +
+  console.log(revoked ? '\nRemoved both connectors from the Claude desktop app, deleted the local keys and cancelled the Google Chat sign-in.'
+    : '\nRemoved both connectors from the Claude desktop app and deleted the Gmail key.\n' +
       'Could not reach Google to cancel the Google Chat sign-in. Run "node setup.mjs uninstall" again later,\n' +
       'or remove the app at https://myaccount.google.com/connections');
   console.log(`Finish by hand:

@@ -52,10 +52,12 @@ const bridge = createServer(async (req,res) => {
 });
 // Claude desktop and Claude Code can each start this server; only one can own the port.
 // The other keeps running and tries again on each call.
-const listen = () => new Promise(resolve => {
-  const failed = () => resolve(false);
-  bridge.once('error',failed);
-  bridge.listen(port,'127.0.0.1',()=>{bridge.off('error',failed);resolve(true);});
+let binding = null;
+const listen = () => binding ??= new Promise(resolve => {
+  const done = ok => {bridge.off('error',failed);bridge.off('listening',succeeded);binding=null;resolve(ok);};
+  const failed = () => done(false), succeeded = () => done(true);
+  bridge.once('error',failed);bridge.once('listening',succeeded);
+  bridge.listen(port,'127.0.0.1');
 });
 let listening = await listen();
 const server = new Server({name:'gmail-chrome',version:'1.0.0'},{capabilities:{tools:{}}});

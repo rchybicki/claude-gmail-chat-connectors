@@ -73,9 +73,14 @@ test('a second copy keeps running while another app owns the port, then takes it
   await new Promise(r=>blocker.once('listening',r));
   const client=new Client({name:'second-copy',version:'1.0.0'});
   try {
-    await client.connect(new StdioClientTransport({command:process.execPath,args:[join(dir,'gmail','server.mjs')],stderr:'pipe'}));
-    const busy=await client.callTool({name:'account_identity',arguments:{}});
-    assert.equal(busy.isError,true);assert.match(busy.content[0].text,/in use.*another Claude app/);
+    const transport=new StdioClientTransport({command:process.execPath,args:[join(dir,'gmail','server.mjs')],stderr:'pipe'});
+    let stderr='';transport.stderr.on('data',d=>stderr+=d);
+    await client.connect(transport);
+    for(let i=0;i<12;i++){
+      const busy=await client.callTool({name:'account_identity',arguments:{}});
+      assert.equal(busy.isError,true);assert.match(busy.content[0].text,/in use.*another Claude app/);
+    }
+    assert.doesNotMatch(stderr,/MaxListeners/,'failed attempts leave no listeners behind');
     await new Promise(r=>blocker.close(r));
     const call=client.callTool({name:'account_identity',arguments:{}});
     const request=await nextRequest();

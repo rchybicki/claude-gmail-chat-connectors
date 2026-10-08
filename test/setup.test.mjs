@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdtempSync, realpathSync, mkdirSync, readFileSync, writeFileSync, statSync, rmSync, existsSync } from 'node:fs';
+import { cpSync, mkdtempSync, realpathSync, symlinkSync, mkdirSync, readFileSync, writeFileSync, statSync, rmSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -66,8 +66,24 @@ test('setup also registers in Claude Code when the claude command exists, and un
   assert.equal(run(['uninstall']).status,0);
   assert.deepEqual(readFileSync(log,'utf8').trim().split('\n'),['mcp remove --scope user gmail-chrome','mcp remove --scope user google-chat']);
 });
-test('without the claude command, setup prints the Claude Code command',{skip:process.platform==='win32'},()=>{
+test('without the claude command, the printed command passes the exact arguments, even for odd folder names',{skip:process.platform==='win32'},()=>{
+  const odd=join(dir,"it's $(echo X) app");
+  cpSync(app,odd,{recursive:true,filter:src=>!src.includes('node_modules')});
+  symlinkSync(join(app,'node_modules'),join(odd,'node_modules'));
   writeFileSync(claudeConfig,'{}');
-  const out=setup('gmail','jan.kowalski@randstad.com');
-  assert.equal(out.status,0);assert.match(out.stdout,/claude "mcp" "add" "--scope" "user" "gmail-chrome"/);
+  const out=spawnSync(process.execPath,[join(odd,'setup.mjs'),'gmail','jan.kowalski@randstad.com'],{encoding:'utf8',env:{...process.env,HOME:home,PATH:join(dir,'bin')}});
+  assert.equal(out.status,0);
+  const command=out.stdout.match(/run: (claude .*)/)[1];
+  const received=spawnSync('/bin/sh',['-c',`claude() { printf '%s\\n' "$@"; }; ${command}`],{encoding:'utf8'}).stdout.trim().split('\n');
+  assert.deepEqual(received,['mcp','add','--scope','user','gmail-chrome','--',join(dir,'bin','node'),join(odd,'gmail','server.mjs')]);
+});
+test('uninstall reports a Claude Code removal that failed',{skip:process.platform==='win32'},()=>{
+  const bin=join(dir,'fail-bin');
+  mkdirSync(bin);writeFileSync(join(bin,'node'),'',{mode:0o755});
+  writeFileSync(join(bin,'claude'),'#!/bin/sh\necho boom >&2\nexit 1\n',{mode:0o755});
+  writeFileSync(claudeConfig,'{}');
+  const out=spawnSync(process.execPath,[join(app,'setup.mjs'),'uninstall'],{encoding:'utf8',env:{...process.env,HOME:home,PATH:bin+':/bin:/usr/bin'}});
+  assert.equal(out.status,0);
+  assert.match(out.stdout,/Could not remove gmail-chrome from Claude Code\. Run: claude 'mcp' 'remove' '--scope' 'user' 'gmail-chrome'/);
+  assert.match(out.stdout,/Could not remove google-chat/);
 });
