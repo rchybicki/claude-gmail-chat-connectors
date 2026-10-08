@@ -6,11 +6,11 @@ const CHAT_SCOPES = ['spaces.readonly', 'memberships.readonly', 'messages.readon
 const page = ok => `<!doctype html><meta charset="utf-8"><title>Google Chat setup</title><p>Google Chat sign-in ${ok ? 'finished' : 'failed; see the setup window'}. You can close this tab.</p>`;
 
 // google-client.json is a Google "Desktop app" client. Google treats its secret as not confidential:
-// it ships with the app, and each user's own consent is what grants access.
+// it ships with the app, and each user's own consent is what grants access. The Google endpoints are
+// fixed here, never read from that file, so a changed file cannot send codes or tokens elsewhere.
 export async function authorize({account, openBrowser}) {
   const c = JSON.parse(readFileSync(clientPath, 'utf8')).installed;
-  if (!c?.client_id || !c.client_secret || !/^https:\/\/accounts\.google\.com\//.test(c.auth_uri) || !/^https:\/\/oauth2\.googleapis\.com\//.test(c.token_uri))
-    throw new Error('This OAuth client file is not a Google "Desktop app" client. In Google Cloud, create an OAuth client of type "Desktop app" and download its JSON.');
+  if (!c?.client_id || !c.client_secret) throw new Error('chat/google-client.json is not a Google "Desktop app" client file.');
   const verifier = randomBytes(32).toString('base64url'), state = randomBytes(16).toString('base64url');
   const server = createServer();
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
@@ -29,13 +29,13 @@ export async function authorize({account, openBrowser}) {
   });
   callback.catch(() => {});
   try {
-    const url = new URL(c.auth_uri);
+    const url = new URL('https://accounts.google.com/o/oauth2/auth');
     url.search = new URLSearchParams({client_id: c.client_id, redirect_uri: redirectUri, response_type: 'code', scope: ['openid', 'email', ...CHAT_SCOPES].join(' '),
       state, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', access_type: 'offline', prompt: 'consent', login_hint: account});
     console.log(`Sign in to Google in your browser. If it does not open, paste this address into it:\n${url}`);
     try { await openBrowser?.(url.href); } catch {}
     const code = await callback;
-    const res = await fetch(c.token_uri, {method: 'POST', signal: AbortSignal.timeout(30_000), body: new URLSearchParams({
+    const res = await fetch('https://oauth2.googleapis.com/token', {method: 'POST', signal: AbortSignal.timeout(30_000), body: new URLSearchParams({
       code, code_verifier: verifier, client_id: c.client_id, client_secret: c.client_secret, redirect_uri: redirectUri, grant_type: 'authorization_code'})});
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(`Google rejected the sign-in (${data.error || `HTTP ${res.status}`}).`);

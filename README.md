@@ -2,7 +2,8 @@
 
 With this tool, Claude Code and the Claude desktop app can work with your work Gmail
 and your Google Chat. It was written for colleagues whose company Google Workspace
-does not let apps connect to Gmail directly.
+does not let apps connect to Gmail directly: the Gmail part works through your own browser
+instead. Read [SECURITY.md](SECURITY.md) before you install.
 
 You can ask Claude, for example:
 
@@ -56,8 +57,9 @@ risks remain. In short:
   to Anthropic, the company behind Claude. Work mail can contain personal data about
   candidates, clients and colleagues. Use this only with a Claude account that your company
   allows for this data.
-- **Your company's IT has not reviewed this tool.** Check your company's rules before you use
-  it with company data. Your company can block the Google Chat part at any time.
+- **Your company's IT has not reviewed or approved this tool.** If your company blocks apps from
+  Gmail, the Gmail part works around that block. Check your company's rules before you use it
+  with company data. Your company can block the Google Chat part at any time.
 - **Claude acts as you.** A Google Chat message that Claude sends shows your name. Claude asks
   before it uses a tool. Read the message before you click "Allow". Do not choose
   "Always allow" for `send_message`.
@@ -132,7 +134,7 @@ the local keys and cancels the Google Chat sign-in. Then remove **Gmail for Clau
 ## How it works
 
 **Gmail.** Claude starts a small local program (`gmail/server.mjs`). When Claude uses a tool, the
-Chrome extension opens a hidden Gmail tab, does the action on the page, checks that the tab
+Chrome extension opens a background Gmail tab (you see it briefly in the tab bar), does the action on the page, checks that the tab
 shows your account, and sends back the result. The program and the extension talk only on
 your computer (`127.0.0.1`). Each message is signed with a random key that setup creates
 (`gmail/extension/bridge-local.json`). The key itself is never sent, so websites and other

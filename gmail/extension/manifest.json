@@ -2,9 +2,10 @@
   "manifest_version": 3,
   "name": "Gmail for Claude",
   "version": "1.0.0",
-  "description": "Lets the Claude desktop app search, read, draft and archive in your Gmail. It never sends email.",
-  "permissions": ["tabs", "scripting", "alarms"],
+  "description": "Lets Claude search, read, draft and archive in your Gmail. It never sends email.",
+  "permissions": ["scripting", "alarms"],
   "host_permissions": ["https://mail.google.com/*", "http://127.0.0.1/*"],
   "background": {"service_worker": "background.js", "type": "module"},
+  "content_security_policy": {"extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://127.0.0.1:3456"},
   "icons": {"16": "icon16.png", "48": "icon48.png", "128": "icon128.png"}
 }

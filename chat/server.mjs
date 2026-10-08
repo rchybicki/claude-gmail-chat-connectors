@@ -9,7 +9,7 @@ const SETUP = 'Google Chat is not set up on this computer. In the connector fold
 let cached = null;
 async function accessToken() {
   if (cached && Date.now() < cached.expires) return cached.value;
-  const res = await fetch(client.token_uri, {method: 'POST', signal: AbortSignal.timeout(30_000), body: new URLSearchParams({
+  const res = await fetch('https://oauth2.googleapis.com/token', {method: 'POST', signal: AbortSignal.timeout(30_000), body: new URLSearchParams({
     grant_type: 'refresh_token', refresh_token: token.refresh_token, client_id: client.client_id, client_secret: client.client_secret})});
   const data = await res.json().catch(() => ({}));
   if (data.error === 'invalid_grant') throw new Error('Google Chat access expired or was revoked. In the connector folder, run the chat setup again: node setup.mjs chat <email>');
