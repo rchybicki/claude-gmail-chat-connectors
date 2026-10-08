@@ -32,19 +32,15 @@ Paste this:
 Install the Gmail and Google Chat connectors from https://github.com/rchybicki/claude-gmail-chat-connectors for me.
 1. Ask me for my work email address, and which parts I want: Gmail, Google Chat, or both.
 2. Check that Node.js 20 or later and git are installed. If one is missing, tell me how to install it and wait.
-3. Clone the repo to ~/claude-gmail-chat-connectors (or git pull if it is already there).
-4. Before you set anything up, do a security review of that code. Read SECURITY.md, then check
-   setup.mjs, chat/ and gmail/ yourself: what the code can access, where my data goes, what it stores,
-   and whether anything differs from SECURITY.md. Run npm ci --ignore-scripts, then npm audit.
-   Explain to me in plain words what you found, the risks, and how I can reduce each one.
-   The decision to install is mine. Wait until I say continue.
-5. For Google Chat, run: node setup.mjs chat <my email>. It opens a browser and waits up to 5 minutes for me
+3. Clone the repo to ~/claude-gmail-chat-connectors (or git pull if it is already there), then run
+   npm ci --ignore-scripts in it.
+4. For Google Chat, run: node setup.mjs chat <my email>. It opens a browser and waits up to 5 minutes for me
    to sign in, so run it with a timeout of at least 6 minutes. Before you run it, tell me: choose my work account,
    click "Advanced" and "Go to Claude Connectors (Radek Chybicki) (unsafe)", tick "Select all", click "Continue".
-6. For Gmail, run: node setup.mjs gmail <my email>. Then walk me through the Chrome steps it prints
+5. For Gmail, run: node setup.mjs gmail <my email>. Then walk me through the Chrome steps it prints
    (Developer mode, "Load unpacked"), and tell me to keep a Gmail tab open and to set Gmail's language to English.
-7. Tell me in a few lines what Claude can and cannot do with these connectors (see README.md).
-8. Tell me to restart the Claude desktop app and start a new Claude Code session, and to ask:
+6. Tell me in a few lines what Claude can and cannot do with these connectors (see README.md).
+7. Tell me to restart the Claude desktop app and start a new Claude Code session, and to ask:
    "Which Gmail account are you connected to?" or "List my Google Chat spaces."
 Never print or copy the files gmail/extension/bridge-local.json or chat/token.json.
 ```
