@@ -1,0 +1,10 @@
+{
+  "name": "randstad-claude-connectors",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Randstad Gmail and Google Chat access for the Claude desktop app",
+  "type": "module",
+  "engines": {"node": ">=20"},
+  "scripts": {"test": "node --test"},
+  "dependencies": {"@modelcontextprotocol/sdk": "1.17.0"}
+}
