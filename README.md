@@ -95,10 +95,13 @@ On Windows, use `%USERPROFILE%\Downloads\randstad-chat-client.json` for the file
 A browser window opens:
 
 1. Choose your Randstad account.
-2. If Google says **"Google hasn't verified this app"**, click **Advanced** and then
-   **Go to … (unsafe)**. This message shows because the app is not published by a company.
-3. Tick **all** the boxes and click **Continue**.
-4. When the page says that you can close it, go back to the terminal.
+2. Google says **"Google hasn't verified this app"**. It shows the app name and the
+   email address of the person who made the app. Make sure that they are the ones the
+   person who shared this tool told you about. Then click **Advanced** and
+   **Go to … (unsafe)**. This warning shows because a person, not a company, made the app.
+3. Click **Continue**. If Google shows boxes, tick **all** of them and click **Continue**.
+4. When the page says that you can close it, go back to the terminal. It says
+   "Google Chat setup done".
 
 ### 6. Restart Claude
 
