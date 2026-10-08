@@ -1,9 +1,9 @@
 # Gmail and Google Chat for Claude
 
 With this tool, Claude Code and the Claude desktop app can work with your work Gmail
-and your Google Chat. It was written for colleagues whose company Google Workspace
-does not let apps connect to Gmail directly: the Gmail part works through your own browser
-instead. Read [SECURITY.md](SECURITY.md) before you install.
+and your Google Chat. It is for colleagues who want to use Claude with their mail and chat now,
+before their company approves an official connection. The Gmail part works through your own
+signed-in browser. Read [SECURITY.md](SECURITY.md) before you install.
 
 You can ask Claude, for example:
 
@@ -33,10 +33,11 @@ Install the Gmail and Google Chat connectors from https://github.com/rchybicki/c
 1. Ask me for my work email address, and which parts I want: Gmail, Google Chat, or both.
 2. Check that Node.js 20 or later and git are installed. If one is missing, tell me how to install it and wait.
 3. Clone the repo to ~/claude-gmail-chat-connectors (or git pull if it is already there).
-4. Before you set anything up, do a full security review of that code. Read SECURITY.md, then check
+4. Before you set anything up, do a security review of that code. Read SECURITY.md, then check
    setup.mjs, chat/ and gmail/ yourself: what the code can access, where my data goes, what it stores,
    and whether anything differs from SECURITY.md. Run npm ci --ignore-scripts, then npm audit.
-   Explain the risks to me in plain words, give me your recommendation, and wait until I say continue.
+   Explain to me in plain words what you found, the risks, and how I can reduce each one.
+   The decision to install is mine. Wait until I say continue.
 5. For Google Chat, run: node setup.mjs chat <my email>. It opens a browser and waits up to 5 minutes for me
    to sign in, so run it with a timeout of at least 6 minutes. Before you run it, tell me: choose my work account,
    click "Advanced" and "Go to Claude Connectors (Radek Chybicki) (unsafe)", tick "Select all", click "Continue".
@@ -57,9 +58,8 @@ risks remain. In short:
   to Anthropic, the company behind Claude. Work mail can contain personal data about
   candidates, clients and colleagues. Use this only with a Claude account that your company
   allows for this data.
-- **Your company's IT has not reviewed or approved this tool.** If your company blocks apps from
-  Gmail, the Gmail part works around that block. Check your company's rules before you use it
-  with company data. Your company can block the Google Chat part at any time.
+- **Your company's IT has not reviewed this tool.** Use it in line with your company's data
+  rules. Your company can block the Google Chat part at any time.
 - **Claude acts as you.** A Google Chat message that Claude sends shows your name. Claude asks
   before it uses a tool. Read the message before you click "Allow". Do not choose
   "Always allow" for `send_message`.

@@ -15,17 +15,17 @@ the code against it.
   `chat.spaces.readonly`, `chat.memberships.readonly`, `chat.messages.readonly` and
   `chat.messages.create`.
 - No known security defects. `npm audit` reports no known vulnerabilities.
-- Some risks come with any tool of this kind. They are listed below. The largest risk is
-  your company's rules, not the code.
+- Some risks come with any tool of this kind. They are listed below, each with what you can do
+  about it.
 
 ## Risks you accept when you install
 
-1. **Company rules.** Your company's IT has not reviewed or approved this tool. If your company
-   blocks apps from Gmail, the Gmail part works around that block: it uses your own browser
-   instead. Your Google Workspace admins can see that you gave "Claude Connectors (Radek
-   Chybicki)" access to Google Chat. Work mail often contains personal data about candidates,
-   clients and colleagues. Check your company's rules, or ask IT or your data protection
-   contact, before you use this with company data.
+1. **Company approval.** This is a community tool for the time until your company approves an
+   official connection. Your company's IT has not reviewed it. The Gmail part does not use the
+   Google app access that your company controls: it works through your own signed-in browser.
+   Your Google Workspace admins can see that you gave "Claude Connectors (Radek Chybicki)"
+   access to Google Chat. Work mail often contains personal data about candidates, clients and
+   colleagues, so use it in line with your company's data rules.
 2. **Your mail and chat text goes to Anthropic.** When Claude reads an email or a message, the
    text goes to the Claude model. Use a Claude account that your company allows for this data.
 3. **Text in emails, messages or web pages can try to give Claude instructions** ("prompt
