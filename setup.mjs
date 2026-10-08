@@ -62,7 +62,7 @@ const [command, emailArg] = process.argv.slice(2);
 const email = (emailArg || '').trim().toLowerCase();
 if (['gmail', 'chat'].includes(command) && !/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(email))
   fail('Give your work email address, for example: node setup.mjs ' + command + ' jan.kowalski@example.com');
-if (!existsSync(join(here, 'node_modules', '@modelcontextprotocol', 'sdk'))) fail('Run "npm install" in this folder first.');
+if (!existsSync(join(here, 'node_modules', '@modelcontextprotocol', 'sdk'))) fail('Run "npm ci --ignore-scripts" in this folder first.');
 const claude = readClaude();
 
 if (command === 'gmail') {
