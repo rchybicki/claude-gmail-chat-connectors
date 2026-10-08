@@ -183,7 +183,11 @@ test('authorize saves the token for the right account with PKCE', async t => {
   if (process.platform !== 'win32') for (const f of ['token.json', 'oauth-client.json']) assert.equal(statSync(join(chat, f)).mode & 0o777, 0o600);
 
   const {revoke} = await import(pathToFileURL(join(chat, 'auth.mjs')).href);
-  await revoke();
+  writeFileSync(join(chat, 'token.json'), JSON.stringify({account: ACCOUNT, refresh_token: 'google-down'}));
+  assert.equal(await revoke(), false, 'a failed revoke is reported');
+  assert.ok(existsSync(join(chat, 'token.json')) && existsSync(join(chat, 'oauth-client.json')), 'and keeps the files so the user can retry');
+  writeFileSync(join(chat, 'token.json'), JSON.stringify({account: ACCOUNT, refresh_token: 'new-refresh'}));
+  assert.equal(await revoke(), true);
   assert.equal(new URLSearchParams(requests.at(-1).body).get('token'), 'new-refresh');
   assert.ok(!existsSync(join(chat, 'token.json')) && !existsSync(join(chat, 'oauth-client.json')));
 });

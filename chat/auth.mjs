@@ -53,10 +53,17 @@ export async function authorize({account, clientFile, openBrowser}) {
   finally { server.close(); }
 }
 
+// Returns false and keeps the files when Google could not be reached, so the user can retry.
 export async function revoke() {
-  if (existsSync(tokenPath)) try {
-    const {refresh_token} = JSON.parse(readFileSync(tokenPath, 'utf8'));
-    await fetch('https://oauth2.googleapis.com/revoke', {method: 'POST', body: new URLSearchParams({token: refresh_token}), signal: AbortSignal.timeout(30_000)});
-  } catch {}
+  if (existsSync(tokenPath)) {
+    let refresh_token;
+    try { ({refresh_token} = JSON.parse(readFileSync(tokenPath, 'utf8'))); } catch { /* An unreadable token cannot be revoked. */ }
+    if (refresh_token) try {
+      const res = await fetch('https://oauth2.googleapis.com/revoke', {method: 'POST', body: new URLSearchParams({token: refresh_token}), signal: AbortSignal.timeout(30_000)});
+      // 400 means Google already treats the token as invalid.
+      if (!res.ok && res.status !== 400) return false;
+    } catch { return false; }
+  }
   rmSync(tokenPath, {force: true}); rmSync(clientPath, {force: true});
+  return true;
 }

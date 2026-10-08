@@ -20,7 +20,7 @@ globalThis.fetch = async (input, init = {}) => {
     const idToken = `e30.${Buffer.from(JSON.stringify({email: s.email, email_verified: s.email_verified ?? true})).toString('base64url')}.sig`;
     return reply(200, {access_token: ACCESS_TOKEN, refresh_token: s.refresh_token, scope: s.scope, id_token: idToken, expires_in: 3599});
   }
-  if (url.href === 'https://oauth2.googleapis.com/revoke') return reply(200, {});
+  if (url.href === 'https://oauth2.googleapis.com/revoke') return reply(new URLSearchParams(body).get('token') === 'google-down' ? 503 : 200, {});
   if (url.hostname === 'chat.googleapis.com') {
     if (url.pathname.includes('notfound')) return reply(404, {error: {code: 404, message: 'Space not found', status: 'NOT_FOUND'}});
     const authOk = new Headers(init.headers).get('authorization') === `Bearer ${ACCESS_TOKEN}`;

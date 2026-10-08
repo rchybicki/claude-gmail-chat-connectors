@@ -10,7 +10,8 @@ cpSync(new URL('..',import.meta.url),app,{recursive:true,filter:src=>!/(\.git|br
 const claudeConfig=join(home,'Library','Application Support','Claude','claude_desktop_config.json');
 const bridge=join(app,'gmail','extension','bridge-local.json');
 const setup=(...args)=>spawnSync(process.execPath,[join(app,'setup.mjs'),...args],{encoding:'utf8',env:{...process.env,HOME:home,PATH:join(dir,'bin')},timeout:20000});
-mkdirSync(join(dir,'bin'));writeFileSync(join(dir,'bin','node'),'');
+mkdirSync(join(dir,'bin'));writeFileSync(join(dir,'bin','node'),'',{mode:0o755});
+mkdirSync(join(dir,'bad'));writeFileSync(join(dir,'bad','node'),'',{mode:0o644});
 test.after(()=>rmSync(dir,{recursive:true,force:true}));
 test('gmail setup writes a private key file and keeps other Claude servers',{skip:process.platform==='win32'},()=>{
   mkdirSync(join(claudeConfig,'..'),{recursive:true});
@@ -28,10 +29,14 @@ test('gmail setup writes a private key file and keeps other Claude servers',{ski
 });
 test('bad input and unreadable Claude config change nothing',{skip:process.platform==='win32'},()=>{
   for(const args of [['gmail'],['gmail','not-an-email'],['chat','jan@randstad.com','/no/such/file.json'],['other']]) assert.notEqual(setup(...args).status,0);
-  writeFileSync(claudeConfig,'{broken');
-  const run=setup('gmail','jan.kowalski@randstad.com');
-  assert.notEqual(run.status,0);assert.match(run.stderr,/Cannot read/);
-  assert.equal(readFileSync(claudeConfig,'utf8'),'{broken');
+  const before=readFileSync(bridge,'utf8');
+  for(const text of ['{broken','[]','{"mcpServers":[]}','null']) {
+    writeFileSync(claudeConfig,text);
+    const run=setup('gmail','someone.else@randstad.com');
+    assert.notEqual(run.status,0);assert.match(run.stderr,/Cannot read/);
+    assert.equal(readFileSync(claudeConfig,'utf8'),text);
+    assert.equal(readFileSync(bridge,'utf8'),before,'the Gmail account is not changed either');
+  }
 });
 test('uninstall removes only this tool from Claude and deletes the Gmail key',{skip:process.platform==='win32'},()=>{
   writeFileSync(claudeConfig,JSON.stringify({mcpServers:{other:{command:'x'}}}));
@@ -39,4 +44,10 @@ test('uninstall removes only this tool from Claude and deletes the Gmail key',{s
   assert.equal(setup('uninstall').status,0);
   assert.deepEqual(JSON.parse(readFileSync(claudeConfig,'utf8')).mcpServers,{other:{command:'x'}});
   assert.equal(existsSync(bridge),false);
+});
+test('a node file that cannot run is not registered',{skip:process.platform==='win32'},()=>{
+  writeFileSync(claudeConfig,'{}');
+  const run=spawnSync(process.execPath,[join(app,'setup.mjs'),'gmail','jan.kowalski@randstad.com'],{encoding:'utf8',env:{...process.env,HOME:home,PATH:join(dir,'bad')}});
+  assert.equal(run.status,0);
+  assert.equal(JSON.parse(readFileSync(claudeConfig,'utf8')).mcpServers['randstad-gmail'].command,process.execPath);
 });

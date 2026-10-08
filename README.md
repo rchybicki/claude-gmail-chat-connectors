@@ -90,7 +90,11 @@ Put `randstad-chat-client.json` in your Downloads folder and type:
 node setup.mjs chat jan.kowalski@randstad.com ~/Downloads/randstad-chat-client.json
 ```
 
-On Windows, use `%USERPROFILE%\Downloads\randstad-chat-client.json` for the file.
+On Windows, type:
+
+```
+node setup.mjs chat jan.kowalski@randstad.com "$env:USERPROFILE\Downloads\randstad-chat-client.json"
+```
 
 A browser window opens:
 
@@ -154,9 +158,10 @@ restart Claude and delete this folder.
 gives Claude six tools. When Claude uses a tool, the Chrome extension
 opens a hidden Gmail tab, does the action on the page, checks that the tab shows your
 account, and sends back the result. The program and the extension talk only
-on your computer (`127.0.0.1`), with a random key that setup creates
-(`gmail/extension/bridge-local.json`). Websites cannot use this connection. The
-extension does not copy your Google password or cookies.
+on your computer (`127.0.0.1`). Each message is signed with a random key that setup
+creates (`gmail/extension/bridge-local.json`). The key itself is never sent, so websites
+and other programs cannot use or imitate this connection. The extension does not copy
+your Google password or cookies.
 
 **Google Chat.** Claude starts `chat/server.mjs`. It calls Google's official
 Chat API with your sign-in. Setup checks that you signed in with the email address that

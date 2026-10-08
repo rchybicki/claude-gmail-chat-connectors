@@ -3,34 +3,45 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual, createHmac } from 'node:crypto';
 const {token,account,port} = JSON.parse(readFileSync(new URL('./extension/bridge-local.json', import.meta.url)));
 if (!/^[a-f0-9]{64}$/.test(token) || !/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(account) || !Number.isInteger(port) || port<1024 || port>65535)
   throw new Error('Invalid local configuration; run: node setup.mjs gmail <your email>');
 let pending = null;
-let pollResponse = null;
+let poller = null;
+// Every message is signed with the shared key, which never crosses the wire. A program
+// that takes the port while this server is down cannot learn the key, and the extension
+// runs only requests signed for the nonce of its own poll.
+const sign = text => createHmac('sha256',Buffer.from(token,'hex')).update(text).digest('hex');
+const valid = (signature,text) => {const a=Buffer.from(String(signature||'')),b=Buffer.from(sign(text));return a.length===b.length&&timingSafeEqual(a,b);};
+const usedNonces = new Set();
 const json = (res,status,data) => {res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
 function deliver() {
-  if (pending && !pending.sent && pollResponse && !pollResponse.destroyed) {
-    pending.sent=true;json(pollResponse,200,pending.request);pollResponse=null;
+  if (pending && !pending.sent && poller && !poller.res.destroyed) {
+    const payload=JSON.stringify(pending.request);
+    pending.sent=true;json(poller.res,200,{payload,signature:sign('request\n'+poller.nonce+'\n'+payload)});poller=null;
   }
 }
 const bridge = createServer(async (req,res) => {
-  const expected=Buffer.from('Bearer '+token), provided=Buffer.from(req.headers.authorization || '');
-  const origin=req.headers.origin;
-  if (req.headers.host !== '127.0.0.1:'+port || (origin && !/^chrome-extension:\/\/[a-p]{32}$/.test(origin)) ||
-      provided.length!==expected.length || !timingSafeEqual(provided,expected)) return json(res,403,{error:'Forbidden'});
+  const origin=req.headers.origin, signature=req.headers['x-signature'];
+  if (req.headers.host !== '127.0.0.1:'+port || (origin && !/^chrome-extension:\/\/[a-p]{32}$/.test(origin))) return json(res,403,{error:'Forbidden'});
   if (req.method==='GET' && req.url==='/poll') {
-    if (pollResponse) json(pollResponse,409,{error:'Another poll is active'});
-    pollResponse=res;
-    const timer=setTimeout(()=>{if(pollResponse===res)pollResponse=null;if(!res.writableEnded)json(res,200,{});},20000);
-    res.on('close',()=>{clearTimeout(timer);if(pollResponse===res)pollResponse=null;});
+    const nonce=String(req.headers['x-nonce']||'');
+    if (!/^[0-9a-f-]{36}$/.test(nonce) || usedNonces.has(nonce) || !valid(signature,'poll\n'+nonce)) return json(res,403,{error:'Forbidden'});
+    if (usedNonces.size>10000) usedNonces.clear();
+    usedNonces.add(nonce);
+    if (poller) json(poller.res,409,{error:'Another poll is active'});
+    const current={res,nonce};
+    poller=current;
+    const timer=setTimeout(()=>{if(poller===current)poller=null;if(!res.writableEnded)json(res,200,{});},20000);
+    res.on('close',()=>{clearTimeout(timer);if(poller===current)poller=null;});
     deliver();return;
   }
   if (req.method==='POST' && req.url==='/response') {
     try {
       let body='',size=0;
       for await(const chunk of req) {size+=chunk.length;if(size>2_000_000){json(res,413,{error:'Response too large'});req.destroy();return;}body+=chunk;}
+      if (!valid(signature,'response\n'+body)) return json(res,403,{error:'Forbidden'});
       const response=JSON.parse(body);
       if (!pending || response.id!==pending.request.id) return json(res,404,{error:'No matching request'});
       if (!response.error && response.data?.account!==account) return json(res,400,{error:'Account mismatch'});

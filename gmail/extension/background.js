@@ -139,16 +139,26 @@ async function poll() {
   try {
     const {token,port} = await config;
     const BRIDGE = 'http://127.0.0.1:'+port;
-    const headers = {'Authorization':'Bearer '+token,'Content-Type':'application/json'};
+    // The key never leaves the extension: messages carry HMAC signatures (see gmail/server.mjs).
+    const hex = bytes => [...new Uint8Array(bytes)].map(b=>b.toString(16).padStart(2,'0')).join('');
+    const unhex = text => new Uint8Array(text.match(/../g).map(h=>parseInt(h,16)));
+    const key = await crypto.subtle.importKey('raw',unhex(token),{name:'HMAC',hash:'SHA-256'},false,['sign','verify']);
+    const sign = async text => hex(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(text)));
+    const verify = async (signature,text) => /^[a-f0-9]{64}$/.test(signature||'') &&
+      crypto.subtle.verify('HMAC',key,unhex(signature),new TextEncoder().encode(text));
     while (true) {
-      const response = await fetch(BRIDGE+'/poll',{headers,signal:AbortSignal.timeout(25000)});
+      const nonce = crypto.randomUUID();
+      const response = await fetch(BRIDGE+'/poll',{headers:{'X-Nonce':nonce,'X-Signature':await sign('poll\n'+nonce)},signal:AbortSignal.timeout(25000)});
       if (!response.ok) throw new Error('Bridge unavailable');
-      const request = await response.json();
-      if (request.id) {
+      const {payload,signature} = await response.json();
+      if (payload) {
+        if (!await verify(signature,'request\n'+nonce+'\n'+payload)) throw new Error('Unsigned bridge request');
+        const request = JSON.parse(payload);
         let result;
         try { result = {data:await run(request)}; }
         catch(error) { result = {error:error.message}; }
-        await fetch(BRIDGE+'/response',{method:'POST',headers,body:JSON.stringify({id:request.id,...result}),signal:AbortSignal.timeout(5000)});
+        const body = JSON.stringify({id:request.id,...result});
+        await fetch(BRIDGE+'/response',{method:'POST',headers:{'Content-Type':'application/json','X-Signature':await sign('response\n'+body)},body,signal:AbortSignal.timeout(5000)});
       }
       await sleep(500);
     }
