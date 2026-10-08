@@ -4,15 +4,15 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprot
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 const load = name => { try { return JSON.parse(readFileSync(new URL(name, import.meta.url), 'utf8')); } catch { return null; } };
-const token = load('token.json'), client = load('oauth-client.json')?.installed;
-const SETUP = 'Google Chat is not set up on this computer. In the connector folder, run: node setup.mjs chat <email> <client-file>';
+const token = load('token.json'), client = load('google-client.json')?.installed;
+const SETUP = 'Google Chat is not set up on this computer. In the connector folder, run: node setup.mjs chat <email>';
 let cached = null;
 async function accessToken() {
   if (cached && Date.now() < cached.expires) return cached.value;
   const res = await fetch(client.token_uri, {method: 'POST', signal: AbortSignal.timeout(30_000), body: new URLSearchParams({
     grant_type: 'refresh_token', refresh_token: token.refresh_token, client_id: client.client_id, client_secret: client.client_secret})});
   const data = await res.json().catch(() => ({}));
-  if (data.error === 'invalid_grant') throw new Error('Google Chat access expired or was revoked. In the connector folder, run the chat setup again: node setup.mjs chat <email> <client-file>');
+  if (data.error === 'invalid_grant') throw new Error('Google Chat access expired or was revoked. In the connector folder, run the chat setup again: node setup.mjs chat <email>');
   if (!res.ok || !data.access_token) throw new Error(`Google sign-in failed (${data.error || `HTTP ${res.status}`})`);
   cached = {value: data.access_token, expires: Date.now() + (data.expires_in - 60) * 1000};
   return cached.value;
@@ -59,7 +59,7 @@ const tools = [
     }}
 ];
 const schema = t => ({type: 'object', properties: t.properties, required: t.required, additionalProperties: false});
-const server = new Server({name: 'randstad-google-chat', version: '1.0.0'}, {capabilities: {tools: {}}});
+const server = new Server({name: 'google-chat', version: '1.0.0'}, {capabilities: {tools: {}}});
 server.setRequestHandler(ListToolsRequestSchema, async () => ({tools: tools.map(t => ({name: t.name, description: t.description, inputSchema: schema(t),
   annotations: t.write ? {readOnlyHint: false, destructiveHint: false, openWorldHint: true} : {readOnlyHint: true}}))}));
 server.setRequestHandler(CallToolRequestSchema, async ({params}) => {

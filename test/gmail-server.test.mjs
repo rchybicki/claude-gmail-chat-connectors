@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { cpSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { randomBytes, randomUUID, createHmac } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -65,4 +66,21 @@ test('invalid local configuration stops the server before it listens',()=>{
   writeFileSync(join(dir,'gmail','extension','bridge-local.json'),JSON.stringify({account:expectedAccount,token:'short',port}));
   const run=spawnSync(process.execPath,[join(dir,'gmail','server.mjs')],{input:'',encoding:'utf8',timeout:10000});
   assert.notEqual(run.status,0);assert.match(run.stderr,/Invalid local configuration/);
+});
+test('a second copy keeps running while another app owns the port, then takes it over',async()=>{
+  writeFileSync(join(dir,'gmail','extension','bridge-local.json'),JSON.stringify({account:expectedAccount,token,port}));
+  const blocker=createServer().listen(port,'127.0.0.1');
+  await new Promise(r=>blocker.once('listening',r));
+  const client=new Client({name:'second-copy',version:'1.0.0'});
+  try {
+    await client.connect(new StdioClientTransport({command:process.execPath,args:[join(dir,'gmail','server.mjs')],stderr:'pipe'}));
+    const busy=await client.callTool({name:'account_identity',arguments:{}});
+    assert.equal(busy.isError,true);assert.match(busy.content[0].text,/in use.*another Claude app/);
+    await new Promise(r=>blocker.close(r));
+    const call=client.callTool({name:'account_identity',arguments:{}});
+    const request=await nextRequest();
+    assert.equal(request.action,'identity');
+    await respond({id:request.id,data:{account:expectedAccount}});
+    assert.equal((await call).isError,undefined);
+  } finally {await client.close();blocker.close();}
 });

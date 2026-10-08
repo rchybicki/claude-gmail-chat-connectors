@@ -1,8 +1,8 @@
 {
-  "name": "randstad-claude-connectors",
+  "name": "claude-gmail-chat-connectors",
   "version": "1.0.0",
   "private": true,
-  "description": "Randstad Gmail and Google Chat access for the Claude desktop app",
+  "description": "Gmail and Google Chat for Claude Code and the Claude desktop app",
   "type": "module",
   "engines": {"node": ">=20"},
   "scripts": {"test": "node --test"},

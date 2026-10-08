@@ -1,10 +1,10 @@
-// Setup for the Claude desktop app. Usage:
-//   node setup.mjs gmail <your Randstad email>
-//   node setup.mjs chat <your Randstad email> <OAuth client file>
+// Adds the connectors to the Claude desktop app and, when the claude command exists, to Claude Code. Usage:
+//   node setup.mjs gmail <your email>
+//   node setup.mjs chat <your email>
 //   node setup.mjs uninstall
 import { readFileSync, writeFileSync, existsSync, chmodSync, copyFileSync, rmSync, mkdirSync, accessSync, statSync, constants } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, dirname, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +13,7 @@ const claudeConfig = process.platform === 'win32'
   ? join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'Claude', 'claude_desktop_config.json')
   : join(homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
 const bridgeFile = join(here, 'gmail', 'extension', 'bridge-local.json');
-const servers = {gmail: ['randstad-gmail', join(here, 'gmail', 'server.mjs')], chat: ['randstad-google-chat', join(here, 'chat', 'server.mjs')]};
+const servers = {gmail: ['gmail-chrome', join(here, 'gmail', 'server.mjs')], chat: ['google-chat', join(here, 'chat', 'server.mjs')]};
 // The node on PATH is a stable link; process.execPath can be a versioned folder that an update removes.
 const runnable = file => { try { accessSync(file, constants.X_OK); return statSync(file).isFile(); } catch { return false; } };
 const node = (process.env.PATH || '').split(delimiter).map(d => join(d, process.platform === 'win32' ? 'node.exe' : 'node'))
@@ -38,12 +38,24 @@ function writeClaude(config, change) {
   change(config.mcpServers);
   writeFileSync(claudeConfig, JSON.stringify(config, null, 2) + '\n');
 }
-const register = (config, key) => writeClaude(config, s => { s[servers[key][0]] = {command: node, args: [servers[key][1]]}; });
+// Claude Code keeps its own list. Without the claude command, print what to run instead.
+function claudeCode(key, add) {
+  const [name, file] = servers[key];
+  spawnSync('claude', ['mcp', 'remove', '--scope', 'user', name], {stdio: 'ignore'});
+  if (!add) return;
+  const args = ['mcp', 'add', '--scope', 'user', name, '--', node, file];
+  if (spawnSync('claude', args, {stdio: 'ignore'}).status === 0) console.log(`Added ${name} to Claude Code.`);
+  else console.log(`To use it in Claude Code too, run: claude ${args.map(a => JSON.stringify(a)).join(' ')}`);
+}
+function register(config, key) {
+  writeClaude(config, s => { s[servers[key][0]] = {command: node, args: [servers[key][1]]}; });
+  claudeCode(key, true);
+}
 
-const [command, emailArg, clientFile] = process.argv.slice(2);
+const [command, emailArg] = process.argv.slice(2);
 const email = (emailArg || '').trim().toLowerCase();
 if (['gmail', 'chat'].includes(command) && !/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(email))
-  fail('Give your Randstad email address, for example: node setup.mjs ' + command + ' jan.kowalski@randstad.com');
+  fail('Give your work email address, for example: node setup.mjs ' + command + ' jan.kowalski@example.com');
 if (!existsSync(join(here, 'node_modules', '@modelcontextprotocol', 'sdk'))) fail('Run "npm install" in this folder first.');
 const claude = readClaude();
 
@@ -62,20 +74,20 @@ Next:
        ${join(here, 'gmail', 'extension')}
      If the extension was already loaded, click its reload button instead.
   3. Open Gmail as ${email} in the same Chrome profile and keep that tab open.
-  4. Quit Claude completely and start it again.`);
+  4. Quit the Claude desktop app completely and start it again, or start a new Claude Code session.`);
 } else if (command === 'chat') {
-  if (!clientFile || !existsSync(clientFile)) fail('Give the path of the OAuth client file, for example: node setup.mjs chat ' + email + ' ~/Downloads/client_secret.json');
   const { authorize } = await import('./chat/auth.mjs');
   const openBrowser = url => {
     const [cmd, args] = process.platform === 'win32' ? ['rundll32', ['url.dll,FileProtocolHandler', url]] : ['open', [url]];
     spawn(cmd, args, {stdio: 'ignore', detached: true}).on('error', () => {}).unref();
   };
   console.log('A browser window opens. Sign in as ' + email + ' and allow all requested Google Chat access.');
-  try { await authorize({account: email, clientFile, openBrowser}); } catch (error) { fail('Chat setup failed: ' + error.message); }
+  try { await authorize({account: email, openBrowser}); } catch (error) { fail('Chat setup failed: ' + error.message); }
   register(claude, 'chat');
-  console.log(`\nGoogle Chat setup done for ${email}.\nNext: quit Claude completely and start it again.`);
+  console.log(`\nGoogle Chat setup done for ${email}.\nNext: quit the Claude desktop app completely and start it again, or start a new Claude Code session.`);
 } else if (command === 'uninstall') {
   writeClaude(claude, s => { for (const [name] of Object.values(servers)) delete s[name]; });
+  for (const key of Object.keys(servers)) claudeCode(key, false);
   rmSync(bridgeFile, {force: true});
   const { revoke } = await import('./chat/auth.mjs');
   const revoked = await revoke();
@@ -84,7 +96,7 @@ Next:
       'Could not reach Google to cancel the Google Chat sign-in. Run "node setup.mjs uninstall" again later,\n' +
       'or remove the app at https://myaccount.google.com/connections');
   console.log(`Finish by hand:
-  1. In Chrome, open chrome://extensions and remove "Randstad Gmail for Claude".
+  1. In Chrome, open chrome://extensions and remove "Gmail for Claude".
   2. Quit and restart Claude.
   3. ${revoked ? 'Delete this folder: ' + here : 'Keep this folder until the Google Chat sign-in is cancelled.'}`);
-} else fail('Usage:\n  node setup.mjs gmail <email>\n  node setup.mjs chat <email> <client file>\n  node setup.mjs uninstall');
+} else fail('Usage:\n  node setup.mjs gmail <email>\n  node setup.mjs chat <email>\n  node setup.mjs uninstall');

@@ -3,7 +3,7 @@ export async function prepareDraft({expectedAccount,to,subject,body,verifyOnly=f
   const identity = () => {
     const labels=[...document.querySelectorAll('#gb [aria-label]')].map(e=>e.getAttribute('aria-label')).filter(s=>/^(Google Account|Konto Google):\s/.test(s||''));
     const accounts=[...new Set(labels.flatMap(s=>s.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)||[]).map(s=>s.toLowerCase()))];
-    if(accounts.length!==1||accounts[0]!==expectedAccount)throw new Error('Randstad account identity missing or mismatched');
+    if(accounts.length!==1||accounts[0]!==expectedAccount)throw new Error('Gmail account identity missing or mismatched');
   };
   identity();
   const dialogs=()=>[...document.querySelectorAll('[role="dialog"]')].filter(e=>e.getClientRects().length&&e.querySelector('input[name="subjectbox"]'));

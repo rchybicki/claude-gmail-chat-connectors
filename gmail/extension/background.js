@@ -19,7 +19,7 @@ async function run(request) {
       break;
     } catch { /* A different account is never a fallback. */ }
   }
-  if (!identity) throw new Error('Open the Randstad Gmail account in this Chrome profile');
+  if (!identity) throw new Error('Open Gmail with the configured account in this Chrome profile');
   if (request.action === 'identity') return {...identity,extensionVersion:chrome.runtime.getManifest().version};
   const base = new URL(identity.baseUrl);
   if (base.origin !== 'https://mail.google.com' || !/^\/mail\/u\/\d+\/$/.test(base.pathname)) throw new Error('Unsupported Gmail account URL');

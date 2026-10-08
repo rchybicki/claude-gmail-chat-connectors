@@ -50,18 +50,23 @@ const bridge = createServer(async (req,res) => {
   }
   json(res,404,{error:'Not found'});
 });
-await new Promise((resolve,reject)=>{bridge.once('error',reject);bridge.listen(port,'127.0.0.1',resolve);}).catch(error=>{
-  throw error.code==='EADDRINUSE' ? new Error('Port '+port+' is in use: another app already runs the Randstad Gmail server. Close it, or use it from one app only.') : error;
+// Claude desktop and Claude Code can each start this server; only one can own the port.
+// The other keeps running and tries again on each call.
+const listen = () => new Promise(resolve => {
+  const failed = () => resolve(false);
+  bridge.once('error',failed);
+  bridge.listen(port,'127.0.0.1',()=>{bridge.off('error',failed);resolve(true);});
 });
-const server = new Server({name:'randstad-gmail',version:'1.0.0'},{capabilities:{tools:{}}});
+let listening = await listen();
+const server = new Server({name:'gmail-chrome',version:'1.0.0'},{capabilities:{tools:{}}});
 const querySchema={type:'string',minLength:1,maxLength:2000,description:'Gmail search query. Results cover only the first rendered page.'};
 server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:[
-  {name:'account_identity',description:'Verify the live Randstad Gmail account.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true}},
-  {name:'search_emails',description:'Search Randstad Gmail, returning the first rendered page. Does not open messages.',inputSchema:{type:'object',properties:{query:querySchema,limit:{type:'integer',minimum:1,maximum:50,default:10}},required:['query'],additionalProperties:false},annotations:{readOnlyHint:true}},
+  {name:'account_identity',description:'Verify the live Gmail account.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true}},
+  {name:'search_emails',description:'Search Gmail, returning the first rendered page. Does not open messages.',inputSchema:{type:'object',properties:{query:querySchema,limit:{type:'integer',minimum:1,maximum:50,default:10}},required:['query'],additionalProperties:false},annotations:{readOnlyHint:true}},
   {name:'read_email',description:'Read a thread returned by the same search query, only if already read. Unread threads are refused. Returns visible expanded messages only.',inputSchema:{type:'object',properties:{query:querySchema,emailId:{type:'string',pattern:'^[a-f0-9]{10,32}$'}},required:['query','emailId'],additionalProperties:false},annotations:{readOnlyHint:true}},
-  {name:'read_email_and_mark_read',description:'Open a Randstad thread and read its visible expanded messages. This MARKS UNREAD MAIL AS READ. Use only when the user authorizes that read-state change. Use read_email for already-read threads without changing unread state.',inputSchema:{type:'object',properties:{query:querySchema,emailId:{type:'string',pattern:'^[a-f0-9]{10,32}$'}},required:['query','emailId'],additionalProperties:false},annotations:{readOnlyHint:false,destructiveHint:false}},
-  {name:'archive_email',description:'Archive ONE Randstad inbox thread by exact ID without opening it. Provide a narrow Gmail query matching only that thread; omit in: and label: operators because Inbox is added automatically. Removes Inbox, does not delete or send. Verifies removal in a fresh Gmail tab. Only use when archiving is authorized; after errors inspect Gmail before retrying.',inputSchema:{type:'object',properties:{query:querySchema,emailId:{type:'string',pattern:'^[a-f0-9]{10,32}$'}},required:['query','emailId'],additionalProperties:false},annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false}},
-  {name:'create_email_draft' ,description:'Create an UNSENT plain-text draft in Randstad Gmail for the user to review and send. One recipient; no attachments or reply threading. Do not automatically retry a timeout or error: a draft may already exist. Use a distinct subject so the saved draft can be identified.',inputSchema:{type:'object',properties:{to:{type:'string'},subject:{type:'string',minLength:1,maxLength:200},body:{type:'string',minLength:1,maxLength:50000}},required:['to','subject','body'],additionalProperties:false},annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false}}
+  {name:'read_email_and_mark_read',description:'Open a Gmail thread and read its visible expanded messages. This MARKS UNREAD MAIL AS READ. Use only when the user authorizes that read-state change. Use read_email for already-read threads without changing unread state.',inputSchema:{type:'object',properties:{query:querySchema,emailId:{type:'string',pattern:'^[a-f0-9]{10,32}$'}},required:['query','emailId'],additionalProperties:false},annotations:{readOnlyHint:false,destructiveHint:false}},
+  {name:'archive_email',description:'Archive ONE Gmail inbox thread by exact ID without opening it. Provide a narrow Gmail query matching only that thread; omit in: and label: operators because Inbox is added automatically. Removes Inbox, does not delete or send. Verifies removal in a fresh Gmail tab. Only use when archiving is authorized; after errors inspect Gmail before retrying.',inputSchema:{type:'object',properties:{query:querySchema,emailId:{type:'string',pattern:'^[a-f0-9]{10,32}$'}},required:['query','emailId'],additionalProperties:false},annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false}},
+  {name:'create_email_draft' ,description:'Create an UNSENT plain-text draft in Gmail for the user to review and send. One recipient; no attachments or reply threading. Do not automatically retry a timeout or error: a draft may already exist. Use a distinct subject so the saved draft can be identified.',inputSchema:{type:'object',properties:{to:{type:'string'},subject:{type:'string',minLength:1,maxLength:200},body:{type:'string',minLength:1,maxLength:50000}},required:['to','subject','body'],additionalProperties:false},annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false}}
 ]}));
 server.setRequestHandler(CallToolRequestSchema,async({params})=>{
   try {
@@ -78,6 +83,8 @@ server.setRequestHandler(CallToolRequestSchema,async({params})=>{
     if(['read','read_and_mark_read','archive'].includes(action) && !/^[a-f0-9]{10,32}$/.test(args.emailId || ''))throw new Error('Invalid thread ID');
     if(action==='archive' && /\b(in|label):/i.test(args.query))throw new Error('Archive query must omit in: and label: operators; Inbox is added automatically');
     if(args.limit!==undefined && (!Number.isInteger(args.limit)||args.limit<1||args.limit>50))throw new Error('Invalid limit');
+    if(!listening && !(listening=await listen()))
+      throw new Error('Port '+port+' is in use, probably by Gmail in another Claude app or session. Close it there, then try again.');
     if(pending)throw new Error('Another mailbox operation is in progress');
     const request={id:randomUUID(),action,...args};
     let timer;

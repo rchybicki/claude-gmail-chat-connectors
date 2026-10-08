@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 // Isolated copy and home folder: never touches the real Claude configuration.
 const dir=realpathSync(mkdtempSync(join(tmpdir(),'randstad-setup-test-'))),home=join(dir,'home'),app=join(dir,'app');
-cpSync(new URL('..',import.meta.url),app,{recursive:true,filter:src=>!/(\.git|bridge-local\.json|token\.json|oauth-client\.json)$/.test(src)});
+cpSync(new URL('..',import.meta.url),app,{recursive:true,filter:src=>!/(\.git|bridge-local\.json|token\.json)$/.test(src)});
 const claudeConfig=join(home,'Library','Application Support','Claude','claude_desktop_config.json');
 const bridge=join(app,'gmail','extension','bridge-local.json');
 const setup=(...args)=>spawnSync(process.execPath,[join(app,'setup.mjs'),...args],{encoding:'utf8',env:{...process.env,HOME:home,PATH:join(dir,'bin')},timeout:20000});
@@ -22,13 +22,13 @@ test('gmail setup writes a private key file and keeps other Claude servers',{ski
   assert.equal(statSync(bridge).mode&0o777,0o600);
   const config=JSON.parse(readFileSync(claudeConfig,'utf8'));
   assert.deepEqual(config.mcpServers.other,{command:'x'});assert.deepEqual(config.preferences,{a:1});
-  assert.deepEqual(config.mcpServers['randstad-gmail'],{command:join(dir,'bin','node'),args:[join(app,'gmail','server.mjs')]});
+  assert.deepEqual(config.mcpServers['gmail-chrome'],{command:join(dir,'bin','node'),args:[join(app,'gmail','server.mjs')]});
   assert.ok(existsSync(claudeConfig+'.bak'));
   assert.equal(setup('gmail','jan.kowalski@randstad.com').status,0);
   assert.equal(JSON.parse(readFileSync(bridge,'utf8')).token,key.token,'rerun keeps the token so the extension needs no reload');
 });
 test('bad input and unreadable Claude config change nothing',{skip:process.platform==='win32'},()=>{
-  for(const args of [['gmail'],['gmail','not-an-email'],['chat','jan@randstad.com','/no/such/file.json'],['other']]) assert.notEqual(setup(...args).status,0);
+  for(const args of [['gmail'],['gmail','not-an-email'],['chat'],['chat','not-an-email'],['other']]) assert.notEqual(setup(...args).status,0);
   const before=readFileSync(bridge,'utf8');
   for(const text of ['{broken','[]','{"mcpServers":[]}','null']) {
     writeFileSync(claudeConfig,text);
@@ -49,5 +49,25 @@ test('a node file that cannot run is not registered',{skip:process.platform==='w
   writeFileSync(claudeConfig,'{}');
   const run=spawnSync(process.execPath,[join(app,'setup.mjs'),'gmail','jan.kowalski@randstad.com'],{encoding:'utf8',env:{...process.env,HOME:home,PATH:join(dir,'bad')}});
   assert.equal(run.status,0);
-  assert.equal(JSON.parse(readFileSync(claudeConfig,'utf8')).mcpServers['randstad-gmail'].command,process.execPath);
+  assert.equal(JSON.parse(readFileSync(claudeConfig,'utf8')).mcpServers['gmail-chrome'].command,process.execPath);
+});
+test('setup also registers in Claude Code when the claude command exists, and uninstall removes it',{skip:process.platform==='win32'},()=>{
+  const bin=join(dir,'cc-bin'),log=join(dir,'claude.log');
+  mkdirSync(bin);writeFileSync(join(bin,'node'),'',{mode:0o755});
+  writeFileSync(join(bin,'claude'),'#!/bin/sh\necho "$@" >> "'+log+'"\n',{mode:0o755});
+  writeFileSync(claudeConfig,'{}');
+  const run=args=>spawnSync(process.execPath,[join(app,'setup.mjs'),...args],{encoding:'utf8',env:{...process.env,HOME:home,PATH:bin+':/bin:/usr/bin'}});
+  const out=run(['gmail','jan.kowalski@randstad.com']);
+  assert.equal(out.status,0);assert.match(out.stdout,/Added gmail-chrome to Claude Code/);
+  assert.deepEqual(readFileSync(log,'utf8').trim().split('\n'),[
+    'mcp remove --scope user gmail-chrome',
+    'mcp add --scope user gmail-chrome -- '+join(bin,'node')+' '+join(app,'gmail','server.mjs')]);
+  rmSync(log);
+  assert.equal(run(['uninstall']).status,0);
+  assert.deepEqual(readFileSync(log,'utf8').trim().split('\n'),['mcp remove --scope user gmail-chrome','mcp remove --scope user google-chat']);
+});
+test('without the claude command, setup prints the Claude Code command',{skip:process.platform==='win32'},()=>{
+  writeFileSync(claudeConfig,'{}');
+  const out=setup('gmail','jan.kowalski@randstad.com');
+  assert.equal(out.status,0);assert.match(out.stdout,/claude "mcp" "add" "--scope" "user" "gmail-chrome"/);
 });

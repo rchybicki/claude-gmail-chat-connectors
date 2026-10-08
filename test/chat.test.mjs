@@ -26,7 +26,7 @@ function tempChat(t, files = {}) {
   return chat;
 }
 
-async function startServer(t, files = {'oauth-client.json': desktopClient, 'token.json': {account: ACCOUNT, refresh_token: 'fake-refresh'}}) {
+async function startServer(t, files = {'google-client.json': desktopClient, 'token.json': {account: ACCOUNT, refresh_token: 'fake-refresh'}}) {
   const chat = tempChat(t, files);
   const client = new Client({name: 'test', version: '1'});
   await client.connect(new StdioClientTransport({command: process.execPath, args: ['--import', fake, join(chat, 'server.mjs')], stderr: 'pipe'}));
@@ -138,26 +138,25 @@ test('Google API errors return status and message', async t => {
 });
 
 test('invalid_grant tells the user to re-run setup', async t => {
-  const call = await startServer(t, {'oauth-client.json': desktopClient, 'token.json': {account: ACCOUNT, refresh_token: 'revoked'}});
+  const call = await startServer(t, {'google-client.json': desktopClient, 'token.json': {account: ACCOUNT, refresh_token: 'revoked'}});
   assert.match((await call('list_spaces', {})).error, /expired or was revoked.*node setup\.mjs chat/);
 });
 
 test('missing token files tell the user to run setup', async t => {
-  const call = await startServer(t, {});
+  const call = await startServer(t, {'google-client.json': desktopClient});
   for (const [name, args] of [['list_spaces', {}], ['send_message', {spaceId: 'AAA', text: 'Hi'}]])
-    assert.match((await call(name, args)).error, /not set up.*node setup\.mjs chat <email> <client-file>/);
+    assert.match((await call(name, args)).error, /not set up.*node setup\.mjs chat <email>/);
 });
 
 // authorize(): the test plays the browser by calling the loopback redirect itself.
 async function authorize(t, {client = desktopClient, ...scenario}) {
-  const chat = tempChat(t), clientFile = join(chat, '..', 'client.json');
-  writeFileSync(clientFile, JSON.stringify(client));
+  const chat = tempChat(t, {'google-client.json': client});
   const {authorize} = await import(pathToFileURL(join(chat, 'auth.mjs')).href);
   const code = Buffer.from(JSON.stringify({email: ACCOUNT.toLowerCase(), refresh_token: 'new-refresh', scope: ALL_SCOPES, ...scenario})).toString('base64url');
   let authUrl, page;
   const log = console.log; console.log = () => {};
   t.after(() => { console.log = log; });
-  const result = await authorize({account: ACCOUNT, clientFile, openBrowser: url => {
+  const result = await authorize({account: ACCOUNT, openBrowser: url => {
     authUrl = new URL(url);
     const p = authUrl.searchParams;
     page = fetch(`${p.get('redirect_uri')}/?state=${p.get('state')}&code=${code}`).then(r => r.text());
@@ -179,24 +178,23 @@ test('authorize saves the token for the right account with PKCE', async t => {
   assert.equal(createHash('sha256').update(exchange.get('code_verifier')).digest('base64url'), p.get('code_challenge'));
   assert.equal(exchange.get('redirect_uri'), p.get('redirect_uri'));
   assert.deepEqual(JSON.parse(readFileSync(join(chat, 'token.json'))), {account: ACCOUNT, refresh_token: 'new-refresh'});
-  assert.deepEqual(JSON.parse(readFileSync(join(chat, 'oauth-client.json'))), desktopClient);
-  if (process.platform !== 'win32') for (const f of ['token.json', 'oauth-client.json']) assert.equal(statSync(join(chat, f)).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.equal(statSync(join(chat, 'token.json')).mode & 0o777, 0o600);
 
   const {revoke} = await import(pathToFileURL(join(chat, 'auth.mjs')).href);
   writeFileSync(join(chat, 'token.json'), JSON.stringify({account: ACCOUNT, refresh_token: 'google-down'}));
   assert.equal(await revoke(), false, 'a failed revoke is reported');
-  assert.ok(existsSync(join(chat, 'token.json')) && existsSync(join(chat, 'oauth-client.json')), 'and keeps the files so the user can retry');
+  assert.ok(existsSync(join(chat, 'token.json')), 'and keeps the token so the user can retry');
   writeFileSync(join(chat, 'token.json'), JSON.stringify({account: ACCOUNT, refresh_token: 'new-refresh'}));
   assert.equal(await revoke(), true);
   assert.equal(new URLSearchParams(requests.at(-1).body).get('token'), 'new-refresh');
-  assert.ok(!existsSync(join(chat, 'token.json')) && !existsSync(join(chat, 'oauth-client.json')));
+  assert.ok(!existsSync(join(chat, 'token.json')) && existsSync(join(chat, 'google-client.json')), 'only the token is deleted');
 });
 
 test('authorize with a different account saves nothing', async t => {
   const {result, page, chat} = await authorize(t, {email: 'someone@gmail.com'});
   assert.match(result.error.message, /Signed in as someone@gmail\.com, but this setup is for/);
   assert.match(page, /failed/);
-  assert.ok(!existsSync(join(chat, 'token.json')) && !existsSync(join(chat, 'oauth-client.json')));
+  assert.ok(!existsSync(join(chat, 'token.json')));
 });
 
 test('authorize with an unverified email saves nothing', async t => {

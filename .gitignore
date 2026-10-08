@@ -1,4 +1,3 @@
 node_modules/
 gmail/extension/bridge-local.json
-chat/oauth-client.json
 chat/token.json

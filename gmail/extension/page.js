@@ -5,7 +5,7 @@ export function gmailPageOperation({ action, expectedAccount, query, emailId, li
     .map(el => el.getAttribute('aria-label'))
     .filter(label => /^(Google Account|Konto Google):\s/.test(label || ''));
   const accounts = [...new Set(labels.flatMap(label => label.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || []).map(email => email.toLowerCase()))];
-  if (accounts.length !== 1 || accounts[0] !== expectedAccount) throw new Error('Randstad account identity missing or mismatched');
+  if (accounts.length !== 1 || accounts[0] !== expectedAccount) throw new Error('Gmail account identity missing or mismatched');
   if (action === 'identity') return { account: accounts[0], baseUrl: location.origin + location.pathname };
   if (!['search', 'read', 'read_and_mark_read', 'archive_select', 'archive_ready', 'archive_click', 'archive_status'].includes(action)) throw new Error('Action not allowed');
   const currentQuery = location.hash.startsWith('#search/') ? decodeURIComponent(location.hash.slice(8).replaceAll('+', ' ')) : null;
@@ -74,7 +74,7 @@ export function extractReadThread({ expectedAccount, emailId }) {
   const accountLabel = document.querySelector('#gb [aria-label^="Google Account:"], #gb [aria-label^="Konto Google:"]')?.getAttribute('aria-label');
   const accounts = [...new Set((accountLabel?.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || []).map(email => email.toLowerCase()))];
   const account = accounts[0];
-  if (accounts.length !== 1 || account !== expectedAccount) throw new Error('Randstad account identity missing or mismatched');
+  if (accounts.length !== 1 || account !== expectedAccount) throw new Error('Gmail account identity missing or mismatched');
   const heading = document.querySelector('h2[data-legacy-thread-id]');
   if (heading?.getAttribute('data-legacy-thread-id') !== emailId) throw new Error('Requested thread not loaded');
   const bodies = [...document.querySelectorAll('.a3s')].filter(el => el.getClientRects().length);

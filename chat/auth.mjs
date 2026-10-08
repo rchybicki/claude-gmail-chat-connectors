@@ -1,12 +1,14 @@
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, chmodSync, rmSync, existsSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
-const tokenPath = new URL('token.json', import.meta.url), clientPath = new URL('oauth-client.json', import.meta.url);
+const tokenPath = new URL('token.json', import.meta.url), clientPath = new URL('google-client.json', import.meta.url);
 const CHAT_SCOPES = ['spaces.readonly', 'memberships.readonly', 'messages.readonly', 'messages.create'].map(s => `https://www.googleapis.com/auth/chat.${s}`);
 const page = ok => `<!doctype html><meta charset="utf-8"><title>Google Chat setup</title><p>Google Chat sign-in ${ok ? 'finished' : 'failed; see the setup window'}. You can close this tab.</p>`;
 
-export async function authorize({account, clientFile, openBrowser}) {
-  const raw = readFileSync(clientFile, 'utf8'), c = JSON.parse(raw).installed;
+// google-client.json is a Google "Desktop app" client. Google treats its secret as not confidential:
+// it ships with the app, and each user's own consent is what grants access.
+export async function authorize({account, openBrowser}) {
+  const c = JSON.parse(readFileSync(clientPath, 'utf8')).installed;
   if (!c?.client_id || !c.client_secret || !/^https:\/\/accounts\.google\.com\//.test(c.auth_uri) || !/^https:\/\/oauth2\.googleapis\.com\//.test(c.token_uri))
     throw new Error('This OAuth client file is not a Google "Desktop app" client. In Google Cloud, create an OAuth client of type "Desktop app" and download its JSON.');
   const verifier = randomBytes(32).toString('base64url'), state = randomBytes(16).toString('base64url');
@@ -44,9 +46,7 @@ export async function authorize({account, clientFile, openBrowser}) {
     if (!data.refresh_token) throw new Error('Google returned no refresh token. Run the setup again.');
     const granted = String(data.scope).split(' ');
     if (CHAT_SCOPES.some(s => !granted.includes(s))) throw new Error('Not all Google Chat permissions were granted. Run the setup again and tick all boxes on the Google consent screen.');
-    for (const [file, text] of [[clientPath, raw], [tokenPath, JSON.stringify({account, refresh_token: data.refresh_token})]]) {
-      writeFileSync(file, text, {mode: 0o600}); chmodSync(file, 0o600);
-    }
+    writeFileSync(tokenPath, JSON.stringify({account, refresh_token: data.refresh_token}), {mode: 0o600}); chmodSync(tokenPath, 0o600);
     respond?.(true);
     return {account};
   } catch (error) { respond?.(false); throw error; }
@@ -64,6 +64,6 @@ export async function revoke() {
       if (!res.ok && res.status !== 400) return false;
     } catch { return false; }
   }
-  rmSync(tokenPath, {force: true}); rmSync(clientPath, {force: true});
+  rmSync(tokenPath, {force: true});
   return true;
 }
