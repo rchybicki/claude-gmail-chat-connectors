@@ -30,14 +30,16 @@ the code against it.
    text goes to the Claude model. Use a Claude account that your company allows for this data.
 3. **Text in emails, messages or web pages can try to give Claude instructions** ("prompt
    injection"). For example, an email could ask Claude to post your recent mail into a Chat space.
-   Gmail cannot send, but `send_message` in Google Chat can, so that is the main way data could
-   leak. Setup adds both connectors to every Claude Code session on your computer, also to
-   sessions where Claude reads untrusted code or web pages. Protections:
+   Gmail cannot send. Data could leak through `send_message` in Google Chat, and in Claude Code
+   also through shell commands, web requests or your other connectors. Setup adds both
+   connectors to every Claude Code session on your computer, also to sessions where Claude reads
+   untrusted code or web pages. Protections:
    - Gmail has no send tool.
    - Claude asks you before it uses a tool. Read what it wants to do before you click "Allow".
    - Do not choose "Always allow" for `send_message`, `create_email_draft`, `archive_email` or
-     `read_email_and_mark_read`, and do not let Claude Code approve tools automatically while
-     the connectors are on.
+     `read_email_and_mark_read`, and do not let Claude Code approve tools or commands
+     automatically ("bypass permissions" or auto-approve) while the connectors are on.
+   - If you want the smallest risk, install only Gmail, which cannot send.
 4. **Claude acts as you in Google Chat.** A message that Claude sends shows your name.
 5. **The Google app is run by a person, not a company.** "Claude Connectors (Radek Chybicki)"
    is not verified by Google, so Google shows a warning.
@@ -55,8 +57,10 @@ the code against it.
    tabs and can talk to `127.0.0.1:3456`. Its content security policy (`connect-src` in
    `manifest.json`) blocks connections from the extension to any other server.
 9. **Local files.** Your Google Chat sign-in (`chat/token.json`) and the Gmail key
-   (`gmail/extension/bridge-local.json`) are files that only your user account can read. A
-   program that already runs as you can read them. That is true for every desktop app.
+   (`gmail/extension/bridge-local.json`) are files that only your user account can read (on
+   Windows, through the normal permissions of your user folder). A program that already runs as
+   you can read them. That is true for every desktop app. Keep your computer locked and its
+   disk encrypted.
    `uninstall` deletes them and cancels the Google Chat sign-in.
 
 ## Why `chat/google-client.json` contains a "client secret"
@@ -83,7 +87,7 @@ A scanner flags this file as a secret. It is not one in this case:
 | Google Chat sign-in (`chat/auth.mjs`) | PKCE, random `state`, loopback redirect. The Google addresses are fixed in the code, not read from `google-client.json`. Setup refuses a sign-in with another account or with missing permissions. |
 | Google Chat calls (`chat/server.mjs`) | Only `oauth2.googleapis.com` (sign-in refresh) and `chat.googleapis.com`. Every argument is checked. The access token is never logged or returned. |
 | Files | Keys and sign-ins are owner-only (`0600`) and ignored by git. Nothing logs mail or chat content. |
-| Setup (`setup.mjs`) | In the Claude desktop app settings, changes only the entries `gmail-chrome` and `google-chat`, and keeps a copy of the previous file (`.bak`). It changes nothing when that file cannot be read. In Claude Code, it adds the same two entries at user scope with `claude mcp add`. |
+| Setup (`setup.mjs`) | In the Claude desktop app settings, changes only the entries `gmail-chrome` and `google-chat`, and keeps a copy of the file from before the first setup (`.bak`). It changes nothing when that file cannot be read. In Claude Code, it adds the same two entries at user scope with `claude mcp add`. |
 
 ## Check it yourself
 

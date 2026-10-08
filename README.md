@@ -69,7 +69,7 @@ risks remain. In short:
 
 ## Install by hand
 
-You need Node.js 20 or later ([nodejs.org](https://nodejs.org), "LTS"), git, and for Gmail, Google Chrome.
+It works on macOS and Windows (not Linux). You need Node.js 20 or later ([nodejs.org](https://nodejs.org), "LTS"), git, and for Gmail, Google Chrome.
 
 ```
 git clone https://github.com/rchybicki/claude-gmail-chat-connectors.git

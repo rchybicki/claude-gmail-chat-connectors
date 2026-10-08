@@ -87,3 +87,13 @@ test('uninstall reports a Claude Code removal that failed',{skip:process.platfor
   assert.match(out.stdout,/Could not remove gmail-chrome from Claude Code\. Run: claude 'mcp' 'remove' '--scope' 'user' 'gmail-chrome'/);
   assert.match(out.stdout,/Could not remove google-chat/);
 });
+test('the backup keeps the file from before the first setup, and uninstall without a settings file creates none',{skip:process.platform==='win32'},()=>{
+  writeFileSync(claudeConfig,JSON.stringify({mcpServers:{original:{command:'x'}}}));
+  rmSync(claudeConfig+'.bak',{force:true});
+  assert.equal(setup('gmail','jan.kowalski@randstad.com').status,0);
+  assert.equal(setup('gmail','jan.kowalski@randstad.com').status,0);
+  assert.deepEqual(JSON.parse(readFileSync(claudeConfig+'.bak','utf8')),{mcpServers:{original:{command:'x'}}});
+  rmSync(claudeConfig);rmSync(claudeConfig+'.bak');
+  assert.equal(setup('uninstall').status,0);
+  assert.equal(existsSync(claudeConfig),false);
+});

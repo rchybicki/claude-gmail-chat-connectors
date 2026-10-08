@@ -32,7 +32,8 @@ function readClaude() {
   return config;
 }
 function writeClaude(config, change) {
-  if (existsSync(claudeConfig)) copyFileSync(claudeConfig, claudeConfig + '.bak');
+  // Keep the file from before the first setup; later runs do not replace this copy.
+  if (existsSync(claudeConfig) && !existsSync(claudeConfig + '.bak')) copyFileSync(claudeConfig, claudeConfig + '.bak');
   else mkdirSync(dirname(claudeConfig), {recursive: true});
   config.mcpServers ??= {};
   change(config.mcpServers);
@@ -92,7 +93,7 @@ Next:
   register(claude, 'chat');
   console.log(`\nGoogle Chat setup done for ${email}.\nNext: quit the Claude desktop app completely and start it again, or start a new Claude Code session.`);
 } else if (command === 'uninstall') {
-  writeClaude(claude, s => { for (const [name] of Object.values(servers)) delete s[name]; });
+  if (existsSync(claudeConfig)) writeClaude(claude, s => { for (const [name] of Object.values(servers)) delete s[name]; });
   for (const key of Object.keys(servers)) claudeCode(key, false);
   rmSync(bridgeFile, {force: true});
   const { revoke } = await import('./chat/auth.mjs');
