@@ -55,8 +55,10 @@ the code against it.
    checksums are fixed in `package-lock.json`, and `npm ci --ignore-scripts` installs exactly
    those without running their install scripts.
 8. **Gmail needs Chrome's Developer mode.** The extension can read and act in `mail.google.com`
-   and `calendar.google.com` tabs and can talk to `127.0.0.1:3456`. Its content security policy (`connect-src` in
-   `manifest.json`) blocks connections from the extension to any other server.
+   and `calendar.google.com` tabs and can talk to `127.0.0.1:3456`. The content security policy
+   of its own pages (`connect-src` in `manifest.json`) blocks connections from them to any other
+   server. Code that the extension runs inside a Calendar tab follows that tab's rules: it calls
+   only `clients6.google.com/calendar/v3`, the address that the Calendar web app also uses.
 9. **Local files.** Your Google Chat sign-in (`chat/token.json`) and the Gmail key
    (`gmail/extension/bridge-local.json`) are files that only your user account can read (on
    Windows, through the normal permissions of your user folder). A program that already runs as

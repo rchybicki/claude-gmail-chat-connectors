@@ -55,9 +55,9 @@ test('MCP discovery, bridge authentication, routing and error propagation',async
     assert.equal((await respond({id:request.id,data:{account:'other@example.com'}})).status,400);
     await respond({id:request.id,error:'Identity check failed'});
     assert.equal((await call).isError,true);
-    for(const args of [{timeMin:'2026-10-12',timeMax:'2026-10-13T00:00:00Z'},{timeMin:'2026-10-12T00:00:00Z'},{timeMin:'2026-10-12T00:00:00Z',timeMax:'2026-10-13T00:00:00Z',limit:251},{timeMin:'2026-10-12T00:00:00Z',timeMax:'2026-10-13T00:00:00Z',calendarId:'a b'},{timeMin:'2026-10-12T00:00:00Z',timeMax:'2026-10-13T00:00:00Z',showDeleted:true}])
+    for(const args of [{timeMin:'2026-10-12',timeMax:'2026-10-13T00:00:00Z'},{timeMin:'2026-10-12T00:00:00Z'},{timeMin:'2026-10-12T00:00:00Z',timeMax:'2026-10-13T00:00:00Z',limit:251},{timeMin:'2026-10-12T00:00:00Z',timeMax:'2026-10-13T00:00:00Z',calendarId:'a b'},{timeMin:'2026-10-12T00:00:00Z',timeMax:'2026-10-13T00:00:00Z',showDeleted:true},{timeMin:'2026-02-30T00:00:00Z',timeMax:'2026-03-02T00:00:00Z'},{timeMin:'2026-10-12T00:00Z',timeMax:'2026-10-13T00:00:00Z'},{timeMin:'2026-10-13T00:00:00Z',timeMax:'2026-10-12T00:00:00Z'}])
       assert.equal((await client.callTool({name:'list_events',arguments:args})).isError,true);
-    for(const args of [{eventId:'../other'},{eventId:'abc',accountEmail:'other@example.com'}])assert.equal((await client.callTool({name:'get_event',arguments:args})).isError,true);
+    for(const args of [{eventId:'../other'},{eventId:['abc']},{eventId:123},{eventId:'abc',accountEmail:'other@example.com'}])assert.equal((await client.callTool({name:'get_event',arguments:args})).isError,true);
     const events=client.callTool({name:'list_events',arguments:{timeMin:'2026-10-12T00:00:00+02:00',timeMax:'2026-10-13T00:00:00+02:00',limit:100}});
     const request3=await nextRequest();
     assert.equal(request3.action,'calendar_events');assert.equal(request3.limit,100);

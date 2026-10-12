@@ -21,13 +21,16 @@ async function tabsRetry(operation) {
 async function calendar(request, account) {
   const tab = await tabsRetry(()=>chrome.tabs.create({url:'https://calendar.google.com/calendar/u/0/r?authuser='+encodeURIComponent(account),active:false}));
   try {
-    for (let i=0;i<40;i++) {
-      const result = await page(tab.id, calendarPageOperation, {...request,expectedAccount:account}).catch(()=>({ready:false}));
+    // Injection fails while the tab loads or redirects; keep the last cause for the final error.
+    let lastError;
+    for (let i=0;i<30;i++) {
+      const result = await page(tab.id, calendarPageOperation, {...request,expectedAccount:account}).catch(error=>({ready:false,cause:error.message}));
       if (result.error) throw new Error(result.error);
       if (result.ready !== false) return result;
+      lastError = result.cause;
       await sleep(500);
     }
-    throw new Error('Open Google Calendar with the configured account in this Chrome profile');
+    throw new Error('Open Google Calendar with the configured account in this Chrome profile' + (lastError ? ' (last error: ' + lastError + ')' : ''));
   } finally {
     await tabsRetry(()=>chrome.tabs.remove(tab.id)).catch(()=>{});
   }

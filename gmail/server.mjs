@@ -84,9 +84,12 @@ server.setRequestHandler(CallToolRequestSchema,async({params})=>{
     if(Object.keys(args).some(k=>!allowed.includes(k)))throw new Error('Unknown argument');
     if(action.startsWith('calendar_')) {
       if(args.calendarId!==undefined && (typeof args.calendarId!=='string'||!/^\S{1,254}$/.test(args.calendarId)))throw new Error('Invalid calendar ID');
-      if(action==='calendar_events' && [args.timeMin,args.timeMax].some(t=>typeof t!=='string'||!/^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d(\.\d+)?)?(Z|[+-]\d\d:\d\d)$/.test(t)||isNaN(Date.parse(t))))throw new Error('Invalid timeMin or timeMax; use RFC 3339 with an offset');
+      // RFC 3339 with seconds and an offset; the date must exist (Date.parse accepts 30 February).
+      const time=t=>{const m=typeof t==='string'&&/^(\d{4})-(\d\d)-(\d\d)T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d+)?(Z|[+-]\d\d:\d\d)$/.exec(t);
+        return m&&+m[3]>=1&&+m[3]<=new Date(Date.UTC(+m[1],+m[2],0)).getUTCDate()?Date.parse(t):NaN;};
+      if(action==='calendar_events' && !(time(args.timeMin)<time(args.timeMax)))throw new Error('Invalid timeMin or timeMax; use RFC 3339 with seconds and an offset, timeMin before timeMax');
       if(args.query!==undefined && (typeof args.query!=='string'||!args.query.trim()||args.query.length>200))throw new Error('Invalid query');
-      if(action==='calendar_event' && !/^[A-Za-z0-9_]{1,1024}$/.test(args.eventId || ''))throw new Error('Invalid event ID');
+      if(action==='calendar_event' && (typeof args.eventId!=='string'||!/^[A-Za-z0-9_]{1,1024}$/.test(args.eventId)))throw new Error('Invalid event ID');
     } else if(action==='draft') {
       if(typeof args.to!=='string'||args.to.length>254||!(/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(args.to)))throw new Error('Invalid recipient');
       if(typeof args.subject!=='string'||!args.subject.trim()||args.subject!==args.subject.trim()||args.subject.length>200||/[\\\r\n"\x00-\x1f]/.test(args.subject))throw new Error('Invalid draft subject');

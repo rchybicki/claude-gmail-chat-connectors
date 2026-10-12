@@ -4,15 +4,15 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 const expectedAccount='jan.kowalski@randstad.com';
 const source=readFileSync(new URL('../gmail/extension/calendar.js',import.meta.url),'utf8').replace('export async function','async function');
-// Runs the page operation against a fake Calendar API; `api(path,key)` returns [status, body].
+// Runs the page operation against a fake Calendar API; `api(path,key,params)` returns [status, body].
 async function run(args, api, {cookie='SAPISID=abc/def; other=1', html='<script>"AIzaSyA00000000000000000000000000000000-0" "AIzaSyB11111111111111111111111111111111_1"</script>', pathname='/calendar/u/3/r'}={}) {
   const calls=[];
   const fetch=async(url,options)=>{
     const u=new URL(url);calls.push({path:u.pathname.replace('/calendar/v3/',''),params:Object.fromEntries(u.searchParams),headers:options.headers,credentials:options.credentials});
-    const [status,body]=api(calls.at(-1).path,u.searchParams.get('key'));
-    return {ok:status===200,status,json:async()=>body};
+    const [status,body]=api(calls.at(-1).path,u.searchParams.get('key'),calls.at(-1).params);
+    return {ok:status===200,status,json:async()=>{if(body instanceof Error)throw body;return body;}};
   };
-  const context={document:{cookie,documentElement:{innerHTML:html}},location:{pathname,origin:'https://calendar.google.com'},fetch,crypto:globalThis.crypto,TextEncoder,URLSearchParams,args:{expectedAccount,...args}};
+  const context={document:{cookie,documentElement:{innerHTML:html}},location:{pathname,origin:'https://calendar.google.com'},fetch,crypto:globalThis.crypto,TextEncoder,URLSearchParams,AbortSignal,args:{expectedAccount,...args}};
   vm.createContext(context);
   const result=await vm.runInContext(source+'\ncalendarPageOperation(args);',context);
   return {result:JSON.parse(JSON.stringify(result)),calls};
@@ -44,4 +44,14 @@ test('not found stops without trying other keys; IDs are path-encoded',async()=>
 });
 test('unknown actions are refused',async()=>{
   assert.deepEqual((await run({action:'calendar_insert'},()=>assert.fail('no call'))).result,{error:'Action not allowed'});
+});
+test('an unreadable successful response is an error, not an empty calendar',async()=>{
+  const {result}=await run({action:'calendar_events',timeMin:'a',timeMax:'b'},path=>primary(path)||[200,new SyntaxError('Unexpected end of JSON input')]);
+  assert.match(result.error,/JSON/);
+});
+test('short and empty pages are followed up to the limit; more reports what is left',async()=>{
+  const pages={'':[200,{items:[{id:'e1'}],nextPageToken:'p2'}],p2:[200,{items:[],nextPageToken:'p3'}],p3:[200,{items:[{id:'e2'},{id:'e3'}],nextPageToken:'p4'}]};
+  const {result,calls}=await run({action:'calendar_events',timeMin:'a',timeMax:'b',limit:3},(path,key,params)=>primary(path)||(key.startsWith('AIzaSyA')?pages[params.pageToken||'']:assert.fail('first key works')));
+  assert.deepEqual(result.events.map(e=>e.id),['e1','e2','e3']);assert.equal(result.more,true);
+  assert.deepEqual(calls.slice(1).map(c=>[c.params.pageToken,c.params.maxResults]),[[undefined,'3'],['p2','2'],['p3','2']]);
 });
