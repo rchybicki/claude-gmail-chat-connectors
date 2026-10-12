@@ -9,6 +9,7 @@ You can ask Claude, for example:
 
 - "Find the emails from the payroll team this week and summarise them."
 - "Write a draft reply to Anna about the Thursday meeting." Claude saves a draft. You send it.
+- "What is on my calendar on Thursday?"
 - "What did people say in the Project Phoenix chat space today?"
 - "Search Google Chat for messages about the new rate card."
 
@@ -16,9 +17,9 @@ The two parts are separate. You can install only Gmail, only Google Chat, or bot
 
 | | Gmail (`gmail-chrome`) | Google Chat (`google-chat`) |
 |---|---|---|
-| How it connects | A Chrome extension uses the Gmail tab that you have open | Google's official Chat API, with your sign-in |
-| Claude can | Search, read, write drafts, archive one email at a time | List spaces, read messages, search, send a message |
-| Claude cannot | Send, delete, label, read attachments | Delete, edit or react to messages |
+| How it connects | A Chrome extension uses the Gmail tab that you have open, and opens Google Calendar in a background tab | Google's official Chat API, with your sign-in |
+| Claude can | Search, read, write drafts, archive one email at a time; read your calendars and events | List spaces, read messages, search, send a message |
+| Claude cannot | Send, delete, label, read attachments; create, change or answer events | Delete, edit or react to messages |
 | Needs | Chrome open with your Gmail tab, Gmail in English | Nothing open |
 
 ## Install with Claude Code (recommended)

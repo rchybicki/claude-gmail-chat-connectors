@@ -1,5 +1,6 @@
 import { gmailPageOperation, extractReadThread } from './page.js';
 import { prepareDraft } from './draft.js';
+import { calendarPageOperation } from './calendar.js';
 let polling = false;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const config = fetch(chrome.runtime.getURL('bridge-local.json')).then(r => r.json());
@@ -9,9 +10,32 @@ async function page(tabId, func, args) {
   if (!result[0]?.result) throw new Error('Page returned no result');
   return result[0].result;
 }
+// Chrome refuses tab changes while the user drags a tab; wait for the drag to end.
+async function tabsRetry(operation) {
+  for (let i=0;;i++) {
+    try { return await operation(); }
+    catch (error) { if (i>=20 || !/cannot be edited right now/i.test(error.message)) throw error; await sleep(250); }
+  }
+}
+// Opens Calendar for the configured account in a background tab; the page checks the account.
+async function calendar(request, account) {
+  const tab = await tabsRetry(()=>chrome.tabs.create({url:'https://calendar.google.com/calendar/u/0/r?authuser='+encodeURIComponent(account),active:false}));
+  try {
+    for (let i=0;i<40;i++) {
+      const result = await page(tab.id, calendarPageOperation, {...request,expectedAccount:account}).catch(()=>({ready:false}));
+      if (result.error) throw new Error(result.error);
+      if (result.ready !== false) return result;
+      await sleep(500);
+    }
+    throw new Error('Open Google Calendar with the configured account in this Chrome profile');
+  } finally {
+    await tabsRetry(()=>chrome.tabs.remove(tab.id)).catch(()=>{});
+  }
+}
 async function run(request) {
-  if (!['identity','search','read','read_and_mark_read','draft','archive'].includes(request.action)) throw new Error('Action not allowed');
+  if (!['identity','search','read','read_and_mark_read','draft','archive','calendar_list','calendar_events','calendar_event'].includes(request.action)) throw new Error('Action not allowed');
   const {account:ACCOUNT} = await config;
+  if (request.action.startsWith('calendar_')) return calendar(request, ACCOUNT);
   let identity;
   for (const tab of await chrome.tabs.query({url:'https://mail.google.com/*'})) {
     try {

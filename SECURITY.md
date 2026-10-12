@@ -9,7 +9,8 @@ the code against it.
 - The connectors run on your computer. They talk only to Google, to your Chrome, and to the
   Claude app that starts them. There is no server in between, and the author gets none of your data.
 - Gmail: Claude can search, read, write **unsent** drafts and archive one email. It cannot send,
-  delete or label email.
+  delete or label email. The same extension lets Claude read your Google Calendar. It cannot
+  create, change or answer events.
 - Google Chat: Claude can read and search your spaces and messages, and send a message as you.
   The Google permissions are exactly: `openid`, `email` (to confirm your account),
   `chat.spaces.readonly`, `chat.memberships.readonly`, `chat.messages.readonly` and
@@ -54,7 +55,7 @@ the code against it.
    checksums are fixed in `package-lock.json`, and `npm ci --ignore-scripts` installs exactly
    those without running their install scripts.
 8. **Gmail needs Chrome's Developer mode.** The extension can read and act in `mail.google.com`
-   tabs and can talk to `127.0.0.1:3456`. Its content security policy (`connect-src` in
+   and `calendar.google.com` tabs and can talk to `127.0.0.1:3456`. Its content security policy (`connect-src` in
    `manifest.json`) blocks connections from the extension to any other server.
 9. **Local files.** Your Google Chat sign-in (`chat/token.json`) and the Gmail key
    (`gmail/extension/bridge-local.json`) are files that only your user account can read (on
@@ -83,6 +84,7 @@ A scanner flags this file as a secret. It is not one in this case:
 |---|---|
 | Gmail connection (`gmail/server.mjs`, `gmail/extension/background.js`) | Listens only on `127.0.0.1`. Each message is signed (HMAC-SHA256) with a random key that setup creates. The key itself is never sent. The extension runs only requests signed for its own poll. Web pages are refused by `Origin` and `Host` checks. |
 | Gmail account (`gmail/extension/page.js`) | Each action first checks that the Gmail tab shows exactly your configured account. There is no fallback to another account. |
+| Google Calendar (`gmail/extension/calendar.js`) | Read-only Calendar API calls (`calendar/v3` at `clients6.google.com`) from a Calendar tab, with that tab's session, as the Calendar web app makes them. Each call first checks that the primary calendar is your configured account. |
 | Gmail actions | No send, delete, label or attachment tools. Unread mail is opened only by the separate `read_email_and_mark_read` tool. Archive acts on one exact thread and checks the result. |
 | Google Chat sign-in (`chat/auth.mjs`) | PKCE, random `state`, loopback redirect. The Google addresses are fixed in the code, not read from `google-client.json`. Setup refuses a sign-in with another account or with missing permissions. |
 | Google Chat calls (`chat/server.mjs`) | Only `oauth2.googleapis.com` (sign-in refresh) and `chat.googleapis.com`. Every argument is checked. The access token is never logged or returned. |
@@ -92,7 +94,7 @@ A scanner flags this file as a secret. It is not one in this case:
 ## Check it yourself
 
 - Read `setup.mjs`, `chat/auth.mjs`, `chat/server.mjs`, `gmail/server.mjs` and
-  `gmail/extension/*.js`. Together they are about 700 lines. All network addresses are written in the code.
+  `gmail/extension/*.js`. Together they are about 800 lines. All network addresses are written in the code.
 - `npm ci --ignore-scripts` installs the locked dependency versions and runs no install scripts. `npm audit` checks them for known vulnerabilities.
 - `npm test` runs the automatic tests. They use no real mailbox or chat.
 

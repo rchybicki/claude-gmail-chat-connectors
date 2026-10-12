@@ -30,7 +30,7 @@ test('MCP discovery, bridge authentication, routing and error propagation',async
   const transport=new StdioClientTransport({command:process.execPath,args:[join(dir,'gmail','server.mjs')],stderr:'pipe'});
   try {
     await client.connect(transport);
-    const list=await client.listTools();assert.deepEqual(list.tools.map(t=>t.name),['account_identity','search_emails','read_email','read_email_and_mark_read','archive_email','create_email_draft']);
+    const list=await client.listTools();assert.deepEqual(list.tools.map(t=>t.name),['account_identity','search_emails','read_email','read_email_and_mark_read','archive_email','create_email_draft','list_calendars','list_events','get_event']);
     assert.equal((await fetch(base+'/poll')).status,403);
     assert.equal((await fetch(base+'/poll',{headers:{Authorization:'Bearer '+token}})).status,403,'the old bearer form is refused');
     assert.equal((await poll(randomUUID(),'0'.repeat(64))).status,403);
@@ -55,6 +55,15 @@ test('MCP discovery, bridge authentication, routing and error propagation',async
     assert.equal((await respond({id:request.id,data:{account:'other@example.com'}})).status,400);
     await respond({id:request.id,error:'Identity check failed'});
     assert.equal((await call).isError,true);
+    for(const args of [{timeMin:'2026-10-12',timeMax:'2026-10-13T00:00:00Z'},{timeMin:'2026-10-12T00:00:00Z'},{timeMin:'2026-10-12T00:00:00Z',timeMax:'2026-10-13T00:00:00Z',limit:251},{timeMin:'2026-10-12T00:00:00Z',timeMax:'2026-10-13T00:00:00Z',calendarId:'a b'},{timeMin:'2026-10-12T00:00:00Z',timeMax:'2026-10-13T00:00:00Z',showDeleted:true}])
+      assert.equal((await client.callTool({name:'list_events',arguments:args})).isError,true);
+    for(const args of [{eventId:'../other'},{eventId:'abc',accountEmail:'other@example.com'}])assert.equal((await client.callTool({name:'get_event',arguments:args})).isError,true);
+    const events=client.callTool({name:'list_events',arguments:{timeMin:'2026-10-12T00:00:00+02:00',timeMax:'2026-10-13T00:00:00+02:00',limit:100}});
+    const request3=await nextRequest();
+    assert.equal(request3.action,'calendar_events');assert.equal(request3.limit,100);
+    assert.equal((await respond({id:request3.id,data:{account:'other@example.com',events:[]}})).status,400,'another account is refused');
+    await respond({id:request3.id,data:{account:expectedAccount,events:[]}});
+    assert.equal((await events).isError,undefined);
     const search=client.callTool({name:'search_emails',arguments:{query:'test',limit:1}});
     const request2=await nextRequest();
     assert.equal(request2.action,'search');assert.equal(request2.query,'test');
