@@ -114,6 +114,8 @@ Do not move or delete the folder after setup: Claude runs the connectors from it
 - Without `--allow-send`, Claude writes email **drafts** only. Open Gmail → Drafts, check the draft,
   and send it yourself. With `--allow-send`, Claude sends new emails to one person, without
   attachments. It does not send the same subject to the same person twice.
+- Drafts and emails can have simple formatting: bold, italic, links, bullet and numbered lists.
+  Claude writes them in Markdown; other formatting, images and attachments are not supported.
 - With `--allow-calendar-write`, Claude can create events. If the event has guests, Google emails
   them an invitation from you.
 - Google Chat search skips muted spaces and messages from apps. To see everything in one

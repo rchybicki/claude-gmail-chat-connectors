@@ -1,6 +1,39 @@
 // Creates a draft, or reopens a saved draft to check it. With send, it fills a new message,
 // checks it the same way and presses Send once instead of Save & close; no send shortcut is used.
-export async function prepareDraft({expectedAccount,to,subject,body,verifyOnly=false,emailId,send=false}) {
+export async function prepareDraft({expectedAccount,to,subject,body,format='plain',verifyOnly=false,emailId,send=false}) {
+  // A small Markdown subset becomes formatting through DOM methods only; no HTML is parsed, so the
+  // text cannot add images, styles or scripts. Links must be http, https or mailto.
+  const render=()=>{
+    const root=document.createElement('div');
+    if(format!=='markdown'){root.style.whiteSpace='pre-wrap';root.textContent=body.replace(/\r\n?/g,'\n');return [root];}
+    const inline=(parent,line)=>{
+      const re=/\*\*([^*]+)\*\*|\*([^*]+)\*|\[([^\]]+)\]\(((?:https?:\/\/|mailto:)[^)\s]+)\)/g;
+      let last=0,m;
+      while((m=re.exec(line))){
+        parent.append(line.slice(last,m.index));
+        const el=document.createElement(m[1]!==undefined?'b':m[2]!==undefined?'i':'a');
+        el.textContent=m[1]??m[2]??m[3];
+        if(m[4])el.href=m[4];
+        parent.append(el);last=re.lastIndex;
+      }
+      parent.append(line.slice(last));
+    };
+    const blocks=[];let list=null;
+    for(const line of body.replace(/\r\n?/g,'\n').split('\n')){
+      const item=/^\s*(?:[-*]|(\d+)[.)])\s+(.*)$/.exec(line);
+      if(item){
+        const tag=item[1]?'OL':'UL';
+        if(list?.tagName!==tag){list=document.createElement(tag);blocks.push(list);}
+        const li=document.createElement('li');inline(li,item[2]);list.append(li);
+        continue;
+      }
+      list=null;
+      const div=document.createElement('div');
+      if(line.trim())inline(div,line);else div.append(document.createElement('br'));
+      blocks.push(div);
+    }
+    return blocks;
+  };
   const identity = () => {
     const labels=[...document.querySelectorAll('#gb [aria-label]')].map(e=>e.getAttribute('aria-label')).filter(s=>/^(Google Account|Konto Google):\s/.test(s||''));
     const accounts=[...new Set(labels.flatMap(s=>s.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)||[]).map(s=>s.toLowerCase()))];
@@ -38,9 +71,7 @@ export async function prepareDraft({expectedAccount,to,subject,body,verifyOnly=f
   subjectField.dispatchEvent(new Event('input',{bubbles:true}));
   subjectField.dispatchEvent(new Event('change',{bubbles:true}));
   bodyField.focus();
-  const text=document.createElement('div');
-  text.style.whiteSpace='pre-wrap';text.textContent=body.replace(/\r\n?/g,'\n');
-  bodyField.replaceChildren(text);
+  bodyField.replaceChildren(...render());
   bodyField.dispatchEvent(new Event('input',{bubbles:true}));
   bodyField.dispatchEvent(new Event('change',{bubbles:true}));
   bodyField.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true}));
@@ -50,11 +81,13 @@ export async function prepareDraft({expectedAccount,to,subject,body,verifyOnly=f
   await new Promise(r=>setTimeout(r,2000));
   identity();
   const recipients=[...dialog.querySelectorAll('[email]')].map(e=>e.getAttribute('email').toLowerCase());
-  const normalize=s=>s.replace(/\r\n?/g,'\n').replaceAll('\u00a0',' ').trimEnd();
+  // Compares characters without whitespace: a minimized or background tab has no layout, so
+  // innerText loses line breaks, but any changed, missing or added text still fails.
+  const squash=s=>s.replace(/\s+/g,'');
   const from=dialog.querySelector('input[name="from"]')?.value || '';
   const senders=[...new Set((from.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)||[]).map(s=>s.toLowerCase()))];
   // Gmail leaves the hidden From value empty when the default mailbox sender is used.
-  if((from&&(senders.length!==1||senders[0]!==expectedAccount))||!recipients.length||recipients.some(e=>e!==to.toLowerCase())||subjectField.value!==subject||normalize(bodyField.innerText)!==normalize(body))throw new Error('Draft fields could not be verified; inspect the open draft and do not retry automatically');
+  if((from&&(senders.length!==1||senders[0]!==expectedAccount))||!recipients.length||recipients.some(e=>e!==to.toLowerCase())||subjectField.value!==subject||squash(bodyField.textContent)!==squash(render().map(n=>n.textContent).join('')))throw new Error('Draft fields could not be verified; inspect the open draft and do not retry automatically');
   if(send){
     // Gmail opens the composer minimized in a background tab, so the Send button has no size.
     // A click sends it; a press and release, as for Archive, does not.

@@ -107,7 +107,7 @@ test('send and calendar create exist only when setup turned them on, and are che
     await client.connect(new StdioClientTransport({command:process.execPath,args:[join(dir,'gmail','server.mjs')],stderr:'pipe'}));
     const names=(await client.listTools()).tools.map(t=>t.name);
     assert.ok(names.includes('send_email')&&names.includes('create_event'));
-    for(const args of [{to:'a@b.com',subject:'x',body:'y',cc:'c@d.com'},{to:'a@b.com, c@d.com',subject:'x',body:'y'},{to:'a@b.com',subject:'x"',body:'y'}])
+    for(const args of [{to:'a@b.com',subject:'x',body:'y',cc:'c@d.com'},{to:'a@b.com, c@d.com',subject:'x',body:'y'},{to:'a@b.com',subject:'x"',body:'y'},{to:'a@b.com',subject:'x',body:'y',format:'html'}])
       assert.equal((await client.callTool({name:'send_email',arguments:args})).isError,true);
     const day={title:'Planning',start:'2026-10-14',end:'2026-10-15'};
     for(const args of [{...day,end:'2026-10-14'},{...day,start:'2026-10-14T09:00:00+02:00'},{...day,start:'2026-02-30',end:'2026-03-01'},{...day,title:' '},{...day,attendees:'a@b.com'},{...day,attendees:['a@b.com','a@b.com']},{...day,attendees:['not an email']},{...day,eventId:'mine'},{...day,description:7}])
