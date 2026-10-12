@@ -17,9 +17,23 @@ async function tabsRetry(operation) {
     catch (error) { if (i>=20 || !/cannot be edited right now/i.test(error.message)) throw error; await sleep(250); }
   }
 }
+// The extension's tabs open in one minimized window, so no tab appears in the user's windows
+// and Chrome needs no open window. The window closes with its last tab.
+let workWindow;
+async function openTab(url) {
+  if (workWindow !== undefined) {
+    try { return await tabsRetry(()=>chrome.tabs.create({windowId:workWindow,url,active:false})); }
+    catch { workWindow = undefined; }
+  }
+  const created = await tabsRetry(()=>chrome.windows.create({url,state:'minimized',focused:false}));
+  // macOS Chrome can ignore the state on create.
+  if (created.state !== 'minimized') await chrome.windows.update(created.id,{state:'minimized'}).catch(()=>{});
+  workWindow = created.id;
+  return created.tabs[0];
+}
 // Opens Calendar for the configured account in a background tab; the page checks the account.
 async function calendar(request, account) {
-  const tab = await tabsRetry(()=>chrome.tabs.create({url:'https://calendar.google.com/calendar/u/0/r?authuser='+encodeURIComponent(account),active:false}));
+  const tab = await openTab('https://calendar.google.com/calendar/u/0/r?authuser='+encodeURIComponent(account));
   try {
     // Injection fails while the tab loads or redirects; keep the last cause for the final error.
     let lastError;
@@ -48,7 +62,17 @@ async function run(request) {
       break;
     } catch { /* A different account is never a fallback. */ }
   }
-  if (!identity) throw new Error('Open Gmail with the configured account in this Chrome profile');
+  // Without an open Gmail tab, check the account in a tab of the extension's own.
+  if (!identity) {
+    const tab = await openTab('https://mail.google.com/mail/u/?authuser='+encodeURIComponent(ACCOUNT));
+    try {
+      for (let i=0;i<40&&!identity;i++) {
+        try { identity = await page(tab.id, gmailPageOperation, {action:'identity',expectedAccount:ACCOUNT}); }
+        catch { await sleep(500); }
+      }
+    } finally { await tabsRetry(()=>chrome.tabs.remove(tab.id)).catch(()=>{}); }
+  }
+  if (!identity) throw new Error('Sign in to Gmail with the configured account in this Chrome profile');
   if (request.action === 'identity') return {...identity,extensionVersion:chrome.runtime.getManifest().version};
   const base = new URL(identity.baseUrl);
   if (base.origin !== 'https://mail.google.com' || !/^\/mail\/u\/\d+\/$/.test(base.pathname)) throw new Error('Unsupported Gmail account URL');
@@ -57,10 +81,10 @@ async function run(request) {
     // Send also refuses a subject already sent to this recipient, so a repeated request cannot send twice.
     const query=(send?'{in:drafts in:sent}':'in:drafts')+' subject:"'+request.subject+'" to:'+request.to;
     const sentQuery='in:sent subject:"'+request.subject+'" to:'+request.to;
-    const tab=await chrome.tabs.create({url:base.href+'#search/'+encodeURIComponent(query),active:false});
+    const tab=await openTab(base.href+'#search/'+encodeURIComponent(query));
     let sendAttempted=false,verificationTab;
     // On success the tabs close. After an error the draft tab stays open for inspection.
-    const done=async result=>{await chrome.tabs.remove(tab.id).catch(()=>{});return result;};
+    const done=async result=>{await tabsRetry(()=>chrome.tabs.remove(tab.id)).catch(()=>{});return result;};
     try {
       let ready=false;
       for(let i=0;i<40;i++) {
@@ -80,7 +104,7 @@ async function run(request) {
         await page(tab.id,prepareDraft,{...request,send,expectedAccount:ACCOUNT});
         // Undo Send keeps the email in the sending tab for some seconds, so that tab stays open
         // until a fresh Sent search shows the email.
-        verificationTab=await chrome.tabs.create({url:base.href+'#search/'+encodeURIComponent(sentQuery),active:false});
+        verificationTab=await openTab(base.href+'#search/'+encodeURIComponent(sentQuery));
         for(let i=0;i<30;i++) {
           await sleep(1500);
           try {
@@ -111,12 +135,12 @@ async function run(request) {
       if(error.final)throw error;
       throw new Error((error.message||'Draft operation failed')+(sendAttempted?'; the email may have been sent. Check Sent and Drafts before retrying.':'; inspect Drafts or the open draft tab before retrying. Nothing was sent.'));
     } finally {
-      if(verificationTab)await chrome.tabs.remove(verificationTab.id).catch(()=>{});
+      if(verificationTab)await tabsRetry(()=>chrome.tabs.remove(verificationTab.id)).catch(()=>{});
     }
   }
   if (request.action === 'archive') {
     const query = 'in:inbox (' + request.query + ')';
-    let tab = await chrome.tabs.create({url:base.href+'#search/'+encodeURIComponent(query),active:false});
+    let tab = await openTab(base.href+'#search/'+encodeURIComponent(query));
     const args = {...request,query,expectedAccount:ACCOUNT,limit:50};
     let archiveAttempted = false;
     let verificationTab;
@@ -148,7 +172,7 @@ async function run(request) {
       if (!acknowledged) throw new Error('Gmail did not acknowledge the Archive action');
       // Search rows can remain visible after Archive. Verify in a separate
       // document, keeping the mutation tab alive until persistence is checked.
-      verificationTab = await chrome.tabs.create({url:base.href+'#search/'+encodeURIComponent(query),active:false});
+      verificationTab = await openTab(base.href+'#search/'+encodeURIComponent(query));
       for (let i=0;i<20;i++) {
         try {
           const verified=await page(verificationTab.id,gmailPageOperation,{...args,action:'search'});
@@ -161,11 +185,11 @@ async function run(request) {
     } catch(error) {
       throw new Error(error.message + (archiveAttempted ? '; the thread may already be archived. Check Gmail before retrying.' : ''));
     } finally {
-      if(verificationTab)await chrome.tabs.remove(verificationTab.id).catch(()=>{});
-      await chrome.tabs.remove(tab.id).catch(()=>{});
+      if(verificationTab)await tabsRetry(()=>chrome.tabs.remove(verificationTab.id)).catch(()=>{});
+      await tabsRetry(()=>chrome.tabs.remove(tab.id)).catch(()=>{});
     }
   }
-  const tab = await chrome.tabs.create({url:base.href+'#search/'+encodeURIComponent(request.query),active:false});
+  const tab = await openTab(base.href+'#search/'+encodeURIComponent(request.query));
   try {
     const args = {...request, expectedAccount:ACCOUNT};
     let result, lastError;
@@ -184,7 +208,7 @@ async function run(request) {
     throw new Error((lastError?.message || 'Thread load timed out') +
       (opened.wasUnread ? '; the thread was opened and may now be marked read. Do not retry automatically.' : ''));
   } finally {
-    await chrome.tabs.remove(tab.id).catch(()=>{});
+    await tabsRetry(()=>chrome.tabs.remove(tab.id)).catch(()=>{});
   }
 }
 async function poll() {

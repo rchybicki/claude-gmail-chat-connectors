@@ -18,10 +18,10 @@ The two parts are separate. You can install only Gmail, only Google Chat, or bot
 
 | | Gmail (`gmail-chrome`) | Google Chat (`google-chat`) |
 |---|---|---|
-| How it connects | A Chrome extension uses the Gmail tab that you have open, and opens Google Calendar in a background tab | Google's official Chat API, with your sign-in |
+| How it connects | A Chrome extension opens Gmail and Google Calendar in a minimized Chrome window of its own, with your Chrome sign-in | Google's official Chat API, with your sign-in |
 | Claude can | Search, read, write drafts, archive one email at a time; read your calendars and events. Only if you turn them on: send an email, create an event | List spaces, read messages, search, send a message |
 | Claude cannot | Delete, label, read attachments, reply in a thread; change, delete or answer events | Delete, edit or react to messages |
-| Needs | Chrome open with your Gmail tab, Gmail in English | Nothing open |
+| Needs | Chrome running and signed in to your work Google account, Gmail in English | Nothing open |
 
 ## Install with Claude Code (recommended)
 
@@ -42,7 +42,7 @@ Install the Gmail and Google Chat connectors from https://github.com/rchybicki/c
    click "Advanced" and "Go to Claude Connectors (Radek Chybicki) (unsafe)", tick "Select all", click "Continue".
 5. For Gmail, run: node setup.mjs gmail <my email>, adding --allow-send and/or --allow-calendar-write if I said yes.
    Then walk me through the Chrome steps it prints
-   (Developer mode, "Load unpacked"), and tell me to keep a Gmail tab open and to set Gmail's language to English.
+   (Developer mode, "Load unpacked"), and tell me to stay signed in to Gmail in that Chrome profile and to set Gmail's language to English.
 6. Tell me in a few lines what Claude can and cannot do with these connectors (see README.md).
 7. Tell me to restart the Claude desktop app and start a new Claude Code session, and to ask:
    "Which Gmail account are you connected to?" or "List my Google Chat spaces."
@@ -95,8 +95,8 @@ the options later, run the Gmail setup again with the options you want, reload t
   **Go to Claude Connectors (Radek Chybicki) (unsafe)**. Tick **Select all** and click **Continue**.
   When the page says that you can close it, go back to the terminal.
 - **Gmail:** in Chrome, go to `chrome://extensions` and turn on **Developer mode** (top right).
-  Click **Load unpacked** and select the `gmail/extension` folder. Open Gmail as your work
-  account and keep the tab open. In Gmail, go to Settings → See all settings → Language →
+  Click **Load unpacked** and select the `gmail/extension` folder. Sign in to Gmail with your work
+  account in the same Chrome profile. You do not have to keep a Gmail tab open. In Gmail, go to Settings → See all settings → Language →
   **English (US)**. The extension finds Gmail buttons by their English names.
   If Chrome does not let you turn on Developer mode, your company manages Chrome and blocks
   extensions that you add yourself. Then the Gmail part cannot work for you.
@@ -125,8 +125,9 @@ Do not move or delete the folder after setup: Claude runs the connectors from it
 
 | What you see | What to do |
 |---|---|
-| "Chrome extension unavailable or operation timed out" | Open Chrome and your Gmail tab. Wait 30 seconds and try again. |
-| "Gmail account identity missing or mismatched" | The Gmail tab shows another account, or Gmail is not in English. |
+| "Chrome extension unavailable or operation timed out" | Open Chrome. Wait 30 seconds and try again. |
+| "Sign in to Gmail with the configured account" | Sign in to Gmail with your work account in this Chrome profile. |
+| "Gmail account identity missing or mismatched" | Gmail shows another account, or Gmail is not in English. |
 | "Port 3456 is in use" | Another Claude app or session uses Gmail. Close it there and try again. |
 | Gmail worked before and now fails | Google changed Gmail's page. Run `git pull` in the folder to get an update. |
 | Google Chat says to run setup again | Your Google sign-in expired or was removed. Run `node setup.mjs chat <email>` again. |
@@ -148,8 +149,8 @@ the local keys and cancels the Google Chat sign-in. Then remove **Gmail for Clau
 ## How it works
 
 **Gmail.** Claude starts a small local program (`gmail/server.mjs`). When Claude uses a tool, the
-Chrome extension opens a background Gmail tab (you see it briefly in the tab bar), does the action on the page, checks that the tab
-shows your account, and sends back the result. The program and the extension talk only on
+Chrome extension opens Gmail in a minimized Chrome window of its own, does the action on the page, checks that the page
+shows your account, closes the window, and sends back the result. The program and the extension talk only on
 your computer (`127.0.0.1`). Each message is signed with a random key that setup creates
 (`gmail/extension/bridge-local.json`). The key itself is never sent, so websites and other
 programs cannot use or imitate this connection. The extension does not copy your Google

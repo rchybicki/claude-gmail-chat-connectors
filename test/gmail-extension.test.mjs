@@ -7,7 +7,7 @@ const source=readFileSync(new URL('../gmail/extension/background.js',import.meta
 const account='jan.kowalski@randstad.com',token=randomBytes(32).toString('hex'),port=3456;
 const sign=text=>createHmac('sha256',Buffer.from(token,'hex')).update(text).digest('hex');
 // Runs the extension against a server that answers the first poll with `answer(nonce)`.
-async function bridge(answer,calendarPage,settings={}) {
+async function bridge(answer,calendarPage,settings={},gmailTabs=[{id:1}]) {
   const sent=[],pageCalls=[],tabs=[];let polls=0,done;
   const finished=new Promise(r=>done=r);
   const fetch=async(url,options={})=>{
@@ -22,7 +22,8 @@ async function bridge(answer,calendarPage,settings={}) {
   };
   const chrome={runtime:{getURL:()=>'fixture-config',getManifest:()=>({version:'1.0.0'}),onStartup:{addListener(){}},onInstalled:{addListener(){}}},
     alarms:{create(){},onAlarm:{addListener(){}}},
-    tabs:{query:async()=>[{id:1}],create:async({url})=>{tabs.push('open '+url);return {id:7};},remove:async id=>{tabs.push('close '+id);}},
+    tabs:{query:async()=>gmailTabs,create:async({url,windowId})=>{tabs.push('open '+url+' in '+windowId);return {id:8};},remove:async id=>{tabs.push('close '+id);}},
+    windows:{create:async({url,state,focused})=>{tabs.push('window '+state+' '+focused+' '+url);return {id:9,state,tabs:[{id:7}]};}},
     scripting:{executeScript:async({args:[args]})=>{pageCalls.push(args.action);return [{result:args.action.startsWith('calendar_')?calendarPage(args,pageCalls.length):{account,baseUrl:'https://mail.google.com/mail/u/0/'}}];}}};
   const context={fetch,chrome,crypto:globalThis.crypto,TextEncoder,AbortSignal,URL,setTimeout,gmailPageOperation(){},extractReadThread(){},prepareDraft(){},calendarPageOperation(){}};
   vm.createContext(context);vm.runInContext(source,context);
@@ -55,7 +56,7 @@ test('calendar requests use a background Calendar tab for the configured account
     return n<2?{ready:false}:{account,calendars:[]};
   });
   assert.deepEqual(pageCalls,['calendar_list','calendar_list'],'loading is retried');
-  assert.deepEqual(tabs,['open https://calendar.google.com/calendar/u/0/r?authuser='+encodeURIComponent(account),'close 7']);
+  assert.deepEqual(tabs,['window minimized false https://calendar.google.com/calendar/u/0/r?authuser='+encodeURIComponent(account),'close 7']);
   assert.deepEqual(JSON.parse(sent.find(s=>s.url.endsWith('/response')).body),{id:'c1',data:{account,calendars:[]}});
 });
 test('a calendar page error is returned once, without retries, and the tab is closed',async()=>{
@@ -72,4 +73,10 @@ test('send and calendar create are refused unless setup turned them on',async()=
   }
   const {pageCalls}=await bridge(signed({id:'w3',action:'calendar_create',title:'x',start:'2026-10-14',end:'2026-10-15'}),()=>({account,status:'created'}),{allowCalendarWrite:true});
   assert.deepEqual(pageCalls,['calendar_create']);
+});
+test('without an open Gmail tab, the account is checked in a tab of a minimized window, which is closed',async()=>{
+  const {sent,pageCalls,tabs}=await bridge(signed({id:'i1',action:'identity'}),null,{},[]);
+  assert.deepEqual(pageCalls,['identity']);
+  assert.deepEqual(tabs,['window minimized false https://mail.google.com/mail/u/?authuser='+encodeURIComponent(account),'close 7']);
+  assert.equal(JSON.parse(sent.find(s=>s.url.endsWith('/response')).body).data.account,account);
 });

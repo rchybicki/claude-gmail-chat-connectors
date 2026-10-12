@@ -87,7 +87,7 @@ Next:
   2. Click "Load unpacked" and select this folder:
        ${join(here, 'gmail', 'extension')}
      If the extension was already loaded, click its reload button instead (also after a change of options).
-  3. Open Gmail as ${email} in the same Chrome profile and keep that tab open.
+  3. Sign in to Gmail as ${email} in the same Chrome profile. No Gmail tab needs to stay open.
   4. Quit the Claude desktop app completely and start it again, or start a new Claude Code session.`);
 } else if (command === 'chat') {
   const { authorize } = await import('./chat/auth.mjs');
