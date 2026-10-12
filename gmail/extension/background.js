@@ -36,8 +36,10 @@ async function calendar(request, account) {
   }
 }
 async function run(request) {
-  if (!['identity','search','read','read_and_mark_read','draft','archive','calendar_list','calendar_events','calendar_event'].includes(request.action)) throw new Error('Action not allowed');
-  const {account:ACCOUNT} = await config;
+  const {account:ACCOUNT,allowSend,allowCalendarWrite} = await config;
+  // Send and Calendar writes also need the setup options, checked here as well as in the server.
+  if (!['identity','search','read','read_and_mark_read','draft','archive','calendar_list','calendar_events','calendar_event',
+    ...allowSend===true?['send']:[],...allowCalendarWrite===true?['calendar_create']:[]].includes(request.action)) throw new Error('Action not allowed');
   if (request.action.startsWith('calendar_')) return calendar(request, ACCOUNT);
   let identity;
   for (const tab of await chrome.tabs.query({url:'https://mail.google.com/*'})) {
@@ -50,23 +52,46 @@ async function run(request) {
   if (request.action === 'identity') return {...identity,extensionVersion:chrome.runtime.getManifest().version};
   const base = new URL(identity.baseUrl);
   if (base.origin !== 'https://mail.google.com' || !/^\/mail\/u\/\d+\/$/.test(base.pathname)) throw new Error('Unsupported Gmail account URL');
-  if(request.action==='draft') {
-    const query='in:drafts subject:"'+request.subject+'" to:'+request.to;
+  if(request.action==='draft'||request.action==='send') {
+    const send=request.action==='send';
+    // Send also refuses a subject already sent to this recipient, so a repeated request cannot send twice.
+    const query=(send?'{in:drafts in:sent}':'in:drafts')+' subject:"'+request.subject+'" to:'+request.to;
+    const sentQuery='in:sent subject:"'+request.subject+'" to:'+request.to;
     const tab=await chrome.tabs.create({url:base.href+'#search/'+encodeURIComponent(query),active:false});
+    let sendAttempted=false,verificationTab;
+    // On success the tabs close. After an error the draft tab stays open for inspection.
+    const done=async result=>{await chrome.tabs.remove(tab.id).catch(()=>{});return result;};
     try {
       let ready=false;
       for(let i=0;i<40;i++) {
         try {
           const existing=await page(tab.id,gmailPageOperation,{action:'search',expectedAccount:ACCOUNT,query,limit:50});
           if(existing.emails.some(e=>e.subject===request.subject)){
-            await chrome.tabs.remove(tab.id);
-            return {account:ACCOUNT,status:'existing_draft',sent:false,url:base.href+'#drafts',note:'A draft with this subject and recipient already exists; no draft was created or changed.'};
+            if(send){await done();throw Object.assign(new Error('A draft or sent email with this subject and recipient already exists. Nothing was sent; use another subject.'),{final:true});}
+            return done({account:ACCOUNT,status:'existing_draft',sent:false,url:base.href+'#drafts',note:'A draft with this subject and recipient already exists; no draft was created or changed.'});
           }
           ready=true;break;
         }
-        catch {await sleep(500);}
+        catch(error) {if(error.final)throw error;await sleep(500);}
       }
       if(!ready)throw new Error('Draft tab did not load');
+      if(send) {
+        sendAttempted=true;
+        await page(tab.id,prepareDraft,{...request,send,expectedAccount:ACCOUNT});
+        // Undo Send keeps the email in the sending tab for some seconds, so that tab stays open
+        // until a fresh Sent search shows the email.
+        verificationTab=await chrome.tabs.create({url:base.href+'#search/'+encodeURIComponent(sentQuery),active:false});
+        for(let i=0;i<30;i++) {
+          await sleep(1500);
+          try {
+            const found=await page(verificationTab.id,gmailPageOperation,{action:'search',expectedAccount:ACCOUNT,query:sentQuery,limit:50});
+            if(found.emails.some(e=>e.subject===request.subject))
+              return done({account:ACCOUNT,status:'sent',sent:true,to:request.to,subject:request.subject,verification:'Found in Sent in a fresh tab.'});
+            await chrome.tabs.reload(verificationTab.id);
+          }catch { /* Wait for the Sent search to load. */ }
+        }
+        throw new Error('Sent email not found in Sent');
+      }
       const result=await page(tab.id,prepareDraft,{...request,expectedAccount:ACCOUNT});
       // Reload the search to verify persistence independently of the composer DOM.
       await chrome.tabs.reload(tab.id);
@@ -76,15 +101,17 @@ async function run(request) {
           const matches=found.emails.filter(e=>e.subject===request.subject);
           if(matches.length===1){
             await page(tab.id,prepareDraft,{...request,expectedAccount:ACCOUNT,verifyOnly:true,emailId:matches[0].id});
-            await chrome.tabs.remove(tab.id);
-            return {...result,status:'saved_draft',bodyVerified:true,id:matches[0].id,url:base.href+'#drafts',coverage:'New plain-text draft, one recipient. No attachments, reply threading or sending.'};
+            return done({...result,status:'saved_draft',bodyVerified:true,id:matches[0].id,url:base.href+'#drafts',coverage:'New plain-text draft, one recipient. No attachments, reply threading or sending.'});
           }
         }catch { /* Wait for the saved draft search to load. */ }
         await sleep(500);
       }
       throw new Error('Draft save could not be uniquely verified');
     } catch(error) {
-      throw new Error((error.message||'Draft operation failed')+'; inspect Drafts or the open draft tab before retrying. Nothing was sent.');
+      if(error.final)throw error;
+      throw new Error((error.message||'Draft operation failed')+(sendAttempted?'; the email may have been sent. Check Sent and Drafts before retrying.':'; inspect Drafts or the open draft tab before retrying. Nothing was sent.'));
+    } finally {
+      if(verificationTab)await chrome.tabs.remove(verificationTab.id).catch(()=>{});
     }
   }
   if (request.action === 'archive') {

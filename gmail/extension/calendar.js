@@ -1,8 +1,8 @@
 // Runs in a calendar.google.com tab. Calls the Calendar API the way the Calendar web app does:
-// with the tab's session (SAPISIDHASH) and the API key that the page embeds. Read-only.
+// with the tab's session (SAPISIDHASH) and the API key that the page embeds. Reads, and creates events.
 // Returns {ready:false} while the page loads and {error} on failure, so only loading is retried.
-export async function calendarPageOperation({ action, expectedAccount, calendarId = 'primary', timeMin, timeMax, query, limit = 50, eventId }) {
-  if (!['calendar_list', 'calendar_events', 'calendar_event'].includes(action)) return { error: 'Action not allowed' };
+export async function calendarPageOperation({ action, expectedAccount, calendarId = 'primary', timeMin, timeMax, query, limit = 50, eventId, title, start, end, description, location: place, attendees }) {
+  if (!['calendar_list', 'calendar_events', 'calendar_event', 'calendar_create'].includes(action)) return { error: 'Action not allowed' };
   const authuser = location.pathname.match(/^\/calendar\/u\/(\d+)\//)?.[1];
   const cookies = Object.fromEntries(document.cookie.split('; ').map(c => [c.slice(0, c.indexOf('=')), c.slice(c.indexOf('=') + 1)]));
   const sapisid = cookies.SAPISID || cookies['__Secure-3PAPISID'];
@@ -14,13 +14,15 @@ export async function calendarPageOperation({ action, expectedAccount, calendarI
   // One deadline for the whole operation, so a stalled request cannot hold the extension.
   const signal = AbortSignal.timeout(40000);
   // The page embeds several keys and only some allow Calendar methods; try each.
-  const get = async (path, params = {}) => {
+  const get = async (path, params = {}, body) => {
     let message;
     for (const key of keys) {
-      const response = await fetch('https://clients6.google.com/calendar/v3/' + path + '?' + new URLSearchParams({ ...params, key }), { credentials: 'include', headers, signal });
+      const response = await fetch('https://clients6.google.com/calendar/v3/' + path + '?' + new URLSearchParams({ ...params, key }), body
+        ? { method: 'POST', credentials: 'include', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal }
+        : { credentials: 'include', headers, signal });
       if (response.ok) return response.json();
-      const body = await response.json().catch(() => ({}));
-      message = body.error?.message || 'HTTP ' + response.status;
+      const failure = await response.json().catch(() => ({}));
+      message = failure.error?.message || 'HTTP ' + response.status;
       if (response.status !== 400 && response.status !== 403) break;
     }
     throw new Error('Calendar API: ' + message);
@@ -52,6 +54,12 @@ export async function calendarPageOperation({ action, expectedAccount, calendarI
       if (query) params.q = query;
       const list = await getAll(path, params, limit);
       return { account, calendarId, timeZone: list.timeZone, events: list.items.map(summary), more: list.more };
+    }
+    if (action === 'calendar_create') {
+      const when = t => t.includes('T') ? { dateTime: t } : { date: t };
+      const e = await get(path, { sendUpdates: attendees?.length ? 'all' : 'none' }, { id: eventId, summary: title, start: when(start), end: when(end),
+        description, location: place, attendees: attendees?.map(email => ({ email })) });
+      return { account, calendarId, status: 'created', event: { ...summary(e), link: e.htmlLink } };
     }
     const e = await get(path + '/' + encodeURIComponent(eventId));
     return { account, calendarId, event: { ...summary(e), description: e.description?.slice(0, 20000), link: e.htmlLink,

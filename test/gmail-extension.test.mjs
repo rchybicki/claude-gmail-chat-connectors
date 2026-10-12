@@ -7,11 +7,11 @@ const source=readFileSync(new URL('../gmail/extension/background.js',import.meta
 const account='jan.kowalski@randstad.com',token=randomBytes(32).toString('hex'),port=3456;
 const sign=text=>createHmac('sha256',Buffer.from(token,'hex')).update(text).digest('hex');
 // Runs the extension against a server that answers the first poll with `answer(nonce)`.
-async function bridge(answer,calendarPage) {
+async function bridge(answer,calendarPage,settings={}) {
   const sent=[],pageCalls=[],tabs=[];let polls=0,done;
   const finished=new Promise(r=>done=r);
   const fetch=async(url,options={})=>{
-    if(url==='fixture-config')return {json:async()=>({account,token,port})};
+    if(url==='fixture-config')return {json:async()=>({account,token,port,...settings})};
     sent.push({url,headers:options.headers,body:options.body});
     if(url.endsWith('/poll')){
       if(++polls>1){setTimeout(done,10);throw new Error('stop');}
@@ -63,4 +63,13 @@ test('a calendar page error is returned once, without retries, and the tab is cl
   assert.deepEqual(pageCalls,['calendar_event']);
   assert.equal(tabs.at(-1),'close 7');
   assert.equal(JSON.parse(sent.find(s=>s.url.endsWith('/response')).body).error,'Calendar account identity missing or mismatched');
+});
+test('send and calendar create are refused unless setup turned them on',async()=>{
+  for(const request of [{id:'w1',action:'send',to:'a@b.com',subject:'x',body:'y'},{id:'w2',action:'calendar_create',title:'x',start:'2026-10-14',end:'2026-10-15'}]) {
+    const {sent,pageCalls,tabs}=await bridge(signed(request),()=>assert.fail('no calendar page'));
+    assert.deepEqual(pageCalls,[]);assert.deepEqual(tabs,[]);
+    assert.equal(JSON.parse(sent.find(s=>s.url.endsWith('/response')).body).error,'Action not allowed');
+  }
+  const {pageCalls}=await bridge(signed({id:'w3',action:'calendar_create',title:'x',start:'2026-10-14',end:'2026-10-15'}),()=>({account,status:'created'}),{allowCalendarWrite:true});
+  assert.deepEqual(pageCalls,['calendar_create']);
 });

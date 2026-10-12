@@ -8,7 +8,7 @@ const source=readFileSync(new URL('../gmail/extension/calendar.js',import.meta.u
 async function run(args, api, {cookie='SAPISID=abc/def; other=1', html='<script>"AIzaSyA00000000000000000000000000000000-0" "AIzaSyB11111111111111111111111111111111_1"</script>', pathname='/calendar/u/3/r'}={}) {
   const calls=[];
   const fetch=async(url,options)=>{
-    const u=new URL(url);calls.push({path:u.pathname.replace('/calendar/v3/',''),params:Object.fromEntries(u.searchParams),headers:options.headers,credentials:options.credentials});
+    const u=new URL(url);calls.push({path:u.pathname.replace('/calendar/v3/',''),params:Object.fromEntries(u.searchParams),headers:options.headers,credentials:options.credentials,method:options.method,body:options.body&&JSON.parse(options.body)});
     const [status,body]=api(calls.at(-1).path,u.searchParams.get('key'),calls.at(-1).params);
     return {ok:status===200,status,json:async()=>{if(body instanceof Error)throw body;return body;}};
   };
@@ -54,4 +54,22 @@ test('short and empty pages are followed up to the limit; more reports what is l
   const {result,calls}=await run({action:'calendar_events',timeMin:'a',timeMax:'b',limit:3},(path,key,params)=>primary(path)||(key.startsWith('AIzaSyA')?pages[params.pageToken||'']:assert.fail('first key works')));
   assert.deepEqual(result.events.map(e=>e.id),['e1','e2','e3']);assert.equal(result.more,true);
   assert.deepEqual(calls.slice(1).map(c=>[c.params.pageToken,c.params.maxResults]),[[undefined,'3'],['p2','2'],['p3','2']]);
+});
+test('create posts one event with a fixed ID; guests are invited only when there are guests',async()=>{
+  const created={id:'0f0e',summary:'Planning',start:{date:'2026-10-14'},end:{date:'2026-10-15'},htmlLink:'https://calendar.google.com/event?eid=x'};
+  const {result,calls}=await run({action:'calendar_create',eventId:'0f0e',title:'Planning',start:'2026-10-14',end:'2026-10-15'},path=>primary(path)||[200,created]);
+  assert.equal(result.status,'created');assert.equal(result.event.link,created.htmlLink);
+  const post=calls.at(-1);
+  assert.equal(post.method,'POST');assert.equal(post.path,'calendars/primary/events');assert.equal(post.params.sendUpdates,'none');
+  assert.deepEqual(post.body,{id:'0f0e',summary:'Planning',start:{date:'2026-10-14'},end:{date:'2026-10-15'}});
+  assert.equal(post.headers['Content-Type'],'application/json');assert.match(post.headers.Authorization,/^SAPISIDHASH /);
+  const timed=await run({action:'calendar_create',eventId:'0f0f',title:'Sync',start:'2026-10-14T09:00:00+02:00',end:'2026-10-14T09:30:00+02:00',attendees:['a@randstad.com']},path=>primary(path)||[200,created]);
+  assert.equal(timed.calls.at(-1).params.sendUpdates,'all');
+  assert.deepEqual(timed.calls.at(-1).body.attendees,[{email:'a@randstad.com'}]);assert.deepEqual(timed.calls.at(-1).body.start,{dateTime:'2026-10-14T09:00:00+02:00'});
+});
+test('create is refused for another account and reports an existing ID as an error',async()=>{
+  const other=await run({action:'calendar_create',eventId:'0f0e',title:'x',start:'2026-10-14',end:'2026-10-15'},path=>path==='calendars/primary'?[200,{id:'other@example.com'}]:assert.fail('no create'));
+  assert.match(other.result.error,/identity/);
+  const {result}=await run({action:'calendar_create',eventId:'0f0e',title:'x',start:'2026-10-14',end:'2026-10-15'},path=>primary(path)||[409,{error:{message:'The requested identifier already exists.'}}]);
+  assert.equal(result.error,'Calendar API: The requested identifier already exists.');
 });

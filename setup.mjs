@@ -1,5 +1,5 @@
 // Adds the connectors to the Claude desktop app and, when the claude command exists, to Claude Code. Usage:
-//   node setup.mjs gmail <your email>
+//   node setup.mjs gmail <your email> [--allow-send] [--allow-calendar-write]
 //   node setup.mjs chat <your email>
 //   node setup.mjs uninstall
 import { readFileSync, writeFileSync, existsSync, chmodSync, copyFileSync, rmSync, mkdirSync, accessSync, statSync, constants } from 'node:fs';
@@ -59,10 +59,14 @@ function register(config, key) {
   claudeCode(key, true);
 }
 
-const [command, emailArg] = process.argv.slice(2);
+const [command, emailArg, ...options] = process.argv.slice(2);
 const email = (emailArg || '').trim().toLowerCase();
 if (['gmail', 'chat'].includes(command) && !/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(email))
   fail('Give your work email address, for example: node setup.mjs ' + command + ' jan.kowalski@example.com');
+// Gmail options; each run sets them again, so a run without an option turns it off.
+const gmailOptions = ['--allow-send', '--allow-calendar-write'];
+if (options.some(o => command !== 'gmail' || !gmailOptions.includes(o)))
+  fail('Unknown option. Gmail accepts only: ' + gmailOptions.join(' '));
 if (!existsSync(join(here, 'node_modules', '@modelcontextprotocol', 'sdk'))) fail('Run "npm ci --ignore-scripts" in this folder first.');
 const claude = readClaude();
 
@@ -71,15 +75,18 @@ if (command === 'gmail') {
   try { token = JSON.parse(readFileSync(bridgeFile, 'utf8')).token; } catch { /* First setup. */ }
   // Keep an existing token so an installed extension does not need a reload.
   if (!/^[a-f0-9]{64}$/.test(token || '')) token = randomBytes(32).toString('hex');
-  writePrivate(bridgeFile, {account: email, token, port: 3456});
+  const allowSend = options.includes('--allow-send'), allowCalendarWrite = options.includes('--allow-calendar-write');
+  writePrivate(bridgeFile, {account: email, token, port: 3456, allowSend, allowCalendarWrite});
   register(claude, 'gmail');
   console.log(`
 Gmail setup done for ${email}.
+Claude can send email: ${allowSend ? 'yes' : 'no (drafts only)'}. Claude can create calendar events: ${allowCalendarWrite ? 'yes' : 'no'}.
+To change this, run setup again with or without --allow-send and --allow-calendar-write.
 Next:
   1. In Chrome, open chrome://extensions and turn on "Developer mode" (top right).
   2. Click "Load unpacked" and select this folder:
        ${join(here, 'gmail', 'extension')}
-     If the extension was already loaded, click its reload button instead.
+     If the extension was already loaded, click its reload button instead (also after a change of options).
   3. Open Gmail as ${email} in the same Chrome profile and keep that tab open.
   4. Quit the Claude desktop app completely and start it again, or start a new Claude Code session.`);
 } else if (command === 'chat') {
@@ -106,4 +113,4 @@ Next:
   1. In Chrome, open chrome://extensions and remove "Gmail for Claude".
   2. Quit and restart Claude.
   3. ${revoked ? 'Delete this folder: ' + here : 'Keep this folder until the Google Chat sign-in is cancelled.'}`);
-} else fail('Usage:\n  node setup.mjs gmail <email>\n  node setup.mjs chat <email>\n  node setup.mjs uninstall');
+} else fail('Usage:\n  node setup.mjs gmail <email> [--allow-send] [--allow-calendar-write]\n  node setup.mjs chat <email>\n  node setup.mjs uninstall');

@@ -10,6 +10,7 @@ You can ask Claude, for example:
 - "Find the emails from the payroll team this week and summarise them."
 - "Write a draft reply to Anna about the Thursday meeting." Claude saves a draft. You send it.
 - "What is on my calendar on Thursday?"
+- If you turn them on: "Email Anna that I will be 10 minutes late." "Book 30 minutes with Piotr on Friday at 10."
 - "What did people say in the Project Phoenix chat space today?"
 - "Search Google Chat for messages about the new rate card."
 
@@ -18,8 +19,8 @@ The two parts are separate. You can install only Gmail, only Google Chat, or bot
 | | Gmail (`gmail-chrome`) | Google Chat (`google-chat`) |
 |---|---|---|
 | How it connects | A Chrome extension uses the Gmail tab that you have open, and opens Google Calendar in a background tab | Google's official Chat API, with your sign-in |
-| Claude can | Search, read, write drafts, archive one email at a time; read your calendars and events | List spaces, read messages, search, send a message |
-| Claude cannot | Send, delete, label, read attachments; create, change or answer events | Delete, edit or react to messages |
+| Claude can | Search, read, write drafts, archive one email at a time; read your calendars and events. Only if you turn them on: send an email, create an event | List spaces, read messages, search, send a message |
+| Claude cannot | Delete, label, read attachments, reply in a thread; change, delete or answer events | Delete, edit or react to messages |
 | Needs | Chrome open with your Gmail tab, Gmail in English | Nothing open |
 
 ## Install with Claude Code (recommended)
@@ -31,14 +32,16 @@ Paste this:
 
 ```text
 Install the Gmail and Google Chat connectors from https://github.com/rchybicki/claude-gmail-chat-connectors for me.
-1. Ask me for my work email address, and which parts I want: Gmail, Google Chat, or both.
+1. Ask me for my work email address, and which parts I want: Gmail, Google Chat, or both. For Gmail, also ask
+   if Claude may send email (otherwise it writes drafts only) and if it may create calendar events.
 2. Check that Node.js 20 or later and git are installed. If one is missing, tell me how to install it and wait.
 3. Clone the repo to ~/claude-gmail-chat-connectors (or git pull if it is already there), then run
    npm ci --ignore-scripts in it.
 4. For Google Chat, run: node setup.mjs chat <my email>. It opens a browser and waits up to 5 minutes for me
    to sign in, so run it with a timeout of at least 6 minutes. Before you run it, tell me: choose my work account,
    click "Advanced" and "Go to Claude Connectors (Radek Chybicki) (unsafe)", tick "Select all", click "Continue".
-5. For Gmail, run: node setup.mjs gmail <my email>. Then walk me through the Chrome steps it prints
+5. For Gmail, run: node setup.mjs gmail <my email>, adding --allow-send and/or --allow-calendar-write if I said yes.
+   Then walk me through the Chrome steps it prints
    (Developer mode, "Load unpacked"), and tell me to keep a Gmail tab open and to set Gmail's language to English.
 6. Tell me in a few lines what Claude can and cannot do with these connectors (see README.md).
 7. Tell me to restart the Claude desktop app and start a new Claude Code session, and to ask:
@@ -57,9 +60,10 @@ risks remain. In short:
   allows for this data.
 - **Your company's IT has not reviewed this tool.** Use it in line with your company's data
   rules. Your company can block the Google Chat part at any time.
-- **Claude acts as you.** A Google Chat message that Claude sends shows your name. Claude asks
-  before it uses a tool. Read the message before you click "Allow". Do not choose
-  "Always allow" for `send_message`.
+- **Claude acts as you.** A Google Chat message, and with the options an email or a calendar
+  invitation, that Claude sends shows your name. Claude asks before it uses a tool. Read the
+  message before you click "Allow". Do not choose "Always allow" for `send_message`,
+  `send_email` or `create_event`.
 - **Google shows a warning.** The Google Chat app "Claude Connectors (Radek Chybicki)" is not
   verified by Google, because a person made it, not a company. Google shows the app name and
   the developer address `rchybicki@gmail.com`. Continue only if you trust that person.
@@ -77,6 +81,15 @@ node setup.mjs gmail jan.kowalski@example.com
 ```
 
 Use your own work email address.
+
+Gmail has two options. Both are off unless you add them:
+
+- `--allow-send`: Claude can send an email as you. Without it, Claude writes drafts only.
+- `--allow-calendar-write`: Claude can create calendar events, and invite guests.
+
+For example: `node setup.mjs gmail jan.kowalski@example.com --allow-calendar-write`. To change
+the options later, run the Gmail setup again with the options you want, reload the extension at
+`chrome://extensions`, and restart Claude. A run without an option turns that option off.
 
 - **Google Chat:** a browser opens. Choose your work account. Click **Advanced** and
   **Go to Claude Connectors (Radek Chybicki) (unsafe)**. Tick **Select all** and click **Continue**.
@@ -98,7 +111,11 @@ Do not move or delete the folder after setup: Claude runs the connectors from it
 - Tell Claude what to look for: a sender, a subject, dates. Gmail search returns only the first
   page of results (at most 50 emails). Use a narrower search to find more.
 - Claude reads **unread** emails only if you allow that, because reading marks them as read.
-- Claude writes email **drafts** only. Open Gmail → Drafts, check the draft, and send it yourself.
+- Without `--allow-send`, Claude writes email **drafts** only. Open Gmail → Drafts, check the draft,
+  and send it yourself. With `--allow-send`, Claude sends new emails to one person, without
+  attachments. It does not send the same subject to the same person twice.
+- With `--allow-calendar-write`, Claude can create events. If the event has guests, Google emails
+  them an invitation from you.
 - Google Chat search skips muted spaces and messages from apps. To see everything in one
   space, ask Claude to read that space.
 - Only one Claude app can use Gmail at a time. If the desktop app has it, Claude Code says
@@ -153,5 +170,5 @@ App pages: [home](https://radekisaprettycoolguy.com/claude-connectors/index.html
 
 The Gmail page code comes from [cafferychen777/gmail-mcp](https://github.com/cafferychen777/gmail-mcp)
 (MIT licence). It was changed to add a signed local connection, a strict account check and a
-short list of actions with no send action. Do not use the original project for work mail:
+short list of actions, where sending is off unless you turn it on. Do not use the original project for work mail:
 its local connection has no key and accepts requests from any website.

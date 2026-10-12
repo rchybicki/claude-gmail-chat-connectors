@@ -4,8 +4,10 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprot
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { randomUUID, timingSafeEqual, createHmac } from 'node:crypto';
-const {token,account,port} = JSON.parse(readFileSync(new URL('./extension/bridge-local.json', import.meta.url)));
-if (!/^[a-f0-9]{64}$/.test(token) || !/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(account) || !Number.isInteger(port) || port<1024 || port>65535)
+// allowSend and allowCalendarWrite are off unless setup turned them on.
+const {token,account,port,allowSend=false,allowCalendarWrite=false} = JSON.parse(readFileSync(new URL('./extension/bridge-local.json', import.meta.url)));
+if (!/^[a-f0-9]{64}$/.test(token) || !/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(account) || !Number.isInteger(port) || port<1024 || port>65535 ||
+  typeof allowSend!=='boolean' || typeof allowCalendarWrite!=='boolean')
   throw new Error('Invalid local configuration; run: node setup.mjs gmail <your email>');
 let pending = null;
 let poller = null;
@@ -63,6 +65,9 @@ let listening = await listen();
 const server = new Server({name:'gmail-chrome',version:'1.0.0'},{capabilities:{tools:{}}});
 const calendarIdSchema={type:'string',minLength:1,maxLength:254,default:'primary',description:'Calendar ID from list_calendars; default primary.'};
 const timeSchema={type:'string',description:'RFC 3339 time with offset, for example 2026-10-12T00:00:00+02:00.'};
+const whenSchema={type:'string',description:'RFC 3339 time with offset, for example 2026-10-12T09:30:00+02:00, or a date (2026-10-12) for an all-day event. Use the same form for start and end; an all-day end date is exclusive.'};
+const emailSchema={type:'string',maxLength:254,pattern:'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$'};
+const messageProperties={to:emailSchema,subject:{type:'string',minLength:1,maxLength:200},body:{type:'string',minLength:1,maxLength:50000}};
 const querySchema={type:'string',minLength:1,maxLength:2000,description:'Gmail search query. Results cover only the first rendered page.'};
 server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:[
   {name:'account_identity',description:'Verify the live Gmail account.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true}},
@@ -70,27 +75,39 @@ server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:[
   {name:'read_email',description:'Read a thread returned by the same search query, only if already read. Unread threads are refused. Returns visible expanded messages only.',inputSchema:{type:'object',properties:{query:querySchema,emailId:{type:'string',pattern:'^[a-f0-9]{10,32}$'}},required:['query','emailId'],additionalProperties:false},annotations:{readOnlyHint:true}},
   {name:'read_email_and_mark_read',description:'Open a Gmail thread and read its visible expanded messages. This MARKS UNREAD MAIL AS READ. Use only when the user authorizes that read-state change. Use read_email for already-read threads without changing unread state.',inputSchema:{type:'object',properties:{query:querySchema,emailId:{type:'string',pattern:'^[a-f0-9]{10,32}$'}},required:['query','emailId'],additionalProperties:false},annotations:{readOnlyHint:false,destructiveHint:false}},
   {name:'archive_email',description:'Archive ONE Gmail inbox thread by exact ID without opening it. Provide a narrow Gmail query matching only that thread; omit in: and label: operators because Inbox is added automatically. Removes Inbox, does not delete or send. Verifies removal in a fresh Gmail tab. Only use when archiving is authorized; after errors inspect Gmail before retrying.',inputSchema:{type:'object',properties:{query:querySchema,emailId:{type:'string',pattern:'^[a-f0-9]{10,32}$'}},required:['query','emailId'],additionalProperties:false},annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false}},
-  {name:'create_email_draft' ,description:'Create an UNSENT plain-text draft in Gmail for the user to review and send. One recipient; no attachments or reply threading. Do not automatically retry a timeout or error: a draft may already exist. Use a distinct subject so the saved draft can be identified.',inputSchema:{type:'object',properties:{to:{type:'string'},subject:{type:'string',minLength:1,maxLength:200},body:{type:'string',minLength:1,maxLength:50000}},required:['to','subject','body'],additionalProperties:false},annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false}},
+  {name:'create_email_draft' ,description:'Create an UNSENT plain-text draft in Gmail for the user to review and send. One recipient; no attachments or reply threading. Do not automatically retry a timeout or error: a draft may already exist. Use a distinct subject so the saved draft can be identified.',inputSchema:{type:'object',properties:messageProperties,required:['to','subject','body'],additionalProperties:false},annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false}},
+  ...allowSend?[{name:'send_email',description:'SEND a new plain-text email from Gmail as the user. One recipient; no attachments, CC or reply threading. Saves a draft, checks its fields, sends it and confirms it in Sent. Refused when a draft or sent email with the same subject to the same recipient exists, so use a distinct subject. Only send what the user asked to send. Never retry a timeout or error automatically: the email may already be sent.',inputSchema:{type:'object',properties:messageProperties,required:['to','subject','body'],additionalProperties:false},annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true}}]:[],
   {name:'list_calendars',description:'List the Google Calendar calendars of the configured account. Read-only; opens Calendar in a background Chrome tab.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true}},
   {name:'list_events',description:'List Google Calendar events that overlap timeMin..timeMax, recurring events expanded, in start order. Read-only. Returns no descriptions or guest lists; use get_event for one event.',inputSchema:{type:'object',properties:{calendarId:calendarIdSchema,timeMin:timeSchema,timeMax:timeSchema,query:{type:'string',minLength:1,maxLength:200,description:'Free-text filter on event fields.'},limit:{type:'integer',minimum:1,maximum:250,default:50}},required:['timeMin','timeMax'],additionalProperties:false},annotations:{readOnlyHint:true}},
-  {name:'get_event',description:'Read one Google Calendar event with description, guests and conference links. Read-only.',inputSchema:{type:'object',properties:{calendarId:calendarIdSchema,eventId:{type:'string',pattern:'^[A-Za-z0-9_]{1,1024}$'}},required:['eventId'],additionalProperties:false},annotations:{readOnlyHint:true}}
+  {name:'get_event',description:'Read one Google Calendar event with description, guests and conference links. Read-only.',inputSchema:{type:'object',properties:{calendarId:calendarIdSchema,eventId:{type:'string',pattern:'^[A-Za-z0-9_]{1,1024}$'}},required:['eventId'],additionalProperties:false},annotations:{readOnlyHint:true}},
+  ...allowCalendarWrite?[{name:'create_event',description:'Create an event in Google Calendar. With attendees, Google emails them an invitation from the user. Returns the event ID; after a timeout, check with get_event before you try again.',inputSchema:{type:'object',properties:{calendarId:calendarIdSchema,title:{type:'string',minLength:1,maxLength:1000},start:whenSchema,end:whenSchema,description:{type:'string',maxLength:8000},location:{type:'string',maxLength:1000},attendees:{type:'array',maxItems:50,uniqueItems:true,items:emailSchema,description:'Guest email addresses. Each gets an invitation email.'}},required:['title','start','end'],additionalProperties:false},annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:true}}]:[]
 ]}));
 server.setRequestHandler(CallToolRequestSchema,async({params})=>{
   try {
-    const action={account_identity:'identity',search_emails:'search',read_email:'read',read_email_and_mark_read:'read_and_mark_read',create_email_draft:'draft',archive_email:'archive',list_calendars:'calendar_list',list_events:'calendar_events',get_event:'calendar_event'}[params.name];
+    const action={account_identity:'identity',search_emails:'search',read_email:'read',read_email_and_mark_read:'read_and_mark_read',create_email_draft:'draft',archive_email:'archive',list_calendars:'calendar_list',list_events:'calendar_events',get_event:'calendar_event',
+      ...allowSend&&{send_email:'send'},...allowCalendarWrite&&{create_event:'calendar_create'}}[params.name];
     if(!action)throw new Error('Tool not allowed');
     const args=params.arguments || {};
-    const allowed=action==='identity'||action==='calendar_list'?[]:action==='calendar_events'?['calendarId','timeMin','timeMax','query','limit']:action==='calendar_event'?['calendarId','eventId']:action==='draft'?['to','subject','body']:action==='search'?['query','limit']:['query','emailId'];
+    const allowed=action==='identity'||action==='calendar_list'?[]:action==='calendar_events'?['calendarId','timeMin','timeMax','query','limit']:action==='calendar_event'?['calendarId','eventId']:action==='calendar_create'?['calendarId','title','start','end','description','location','attendees']:action==='draft'||action==='send'?['to','subject','body']:action==='search'?['query','limit']:['query','emailId'];
     if(Object.keys(args).some(k=>!allowed.includes(k)))throw new Error('Unknown argument');
     if(action.startsWith('calendar_')) {
       if(args.calendarId!==undefined && (typeof args.calendarId!=='string'||!/^\S{1,254}$/.test(args.calendarId)))throw new Error('Invalid calendar ID');
-      // RFC 3339 with seconds and an offset; the date must exist (Date.parse accepts 30 February).
-      const time=t=>{const m=typeof t==='string'&&/^(\d{4})-(\d\d)-(\d\d)T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d+)?(Z|[+-]\d\d:\d\d)$/.exec(t);
+      // RFC 3339 with seconds and an offset, or a date for all-day events; the date must exist (Date.parse accepts 30 February).
+      const parse=(t,re)=>{const m=typeof t==='string'&&re.exec(t);
         return m&&+m[3]>=1&&+m[3]<=new Date(Date.UTC(+m[1],+m[2],0)).getUTCDate()?Date.parse(t):NaN;};
+      const time=t=>parse(t,/^(\d{4})-(\d\d)-(\d\d)T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d+)?(Z|[+-]\d\d:\d\d)$/);
+      const day=t=>parse(t,/^(\d{4})-(\d\d)-(\d\d)$/);
       if(action==='calendar_events' && !(time(args.timeMin)<time(args.timeMax)))throw new Error('Invalid timeMin or timeMax; use RFC 3339 with seconds and an offset, timeMin before timeMax');
+      if(action==='calendar_create') {
+        if(!(time(args.start)<time(args.end)) && !(day(args.start)<day(args.end)))throw new Error('Invalid start or end; use two RFC 3339 times with seconds and an offset, or two dates, start before end');
+        if(typeof args.title!=='string'||!args.title.trim()||args.title.length>1000)throw new Error('Invalid title');
+        if(args.description!==undefined && (typeof args.description!=='string'||args.description.length>8000))throw new Error('Invalid description');
+        if(args.location!==undefined && (typeof args.location!=='string'||args.location.length>1000))throw new Error('Invalid location');
+        if(args.attendees!==undefined && (!Array.isArray(args.attendees)||args.attendees.length>50||new Set(args.attendees).size!==args.attendees.length||args.attendees.some(a=>typeof a!=='string'||a.length>254||!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(a))))throw new Error('Invalid attendees');
+      }
       if(args.query!==undefined && (typeof args.query!=='string'||!args.query.trim()||args.query.length>200))throw new Error('Invalid query');
       if(action==='calendar_event' && (typeof args.eventId!=='string'||!/^[A-Za-z0-9_]{1,1024}$/.test(args.eventId)))throw new Error('Invalid event ID');
-    } else if(action==='draft') {
+    } else if(action==='draft'||action==='send') {
       if(typeof args.to!=='string'||args.to.length>254||!(/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(args.to)))throw new Error('Invalid recipient');
       if(typeof args.subject!=='string'||!args.subject.trim()||args.subject!==args.subject.trim()||args.subject.length>200||/[\\\r\n"\x00-\x1f]/.test(args.subject))throw new Error('Invalid draft subject');
       if(typeof args.body!=='string'||!args.body.trim()||args.body.length>50000)throw new Error('Invalid draft body');
@@ -101,7 +118,8 @@ server.setRequestHandler(CallToolRequestSchema,async({params})=>{
     if(!listening && !(listening=await listen()))
       throw new Error('Port '+port+' is in use, probably by Gmail in another Claude app or session. Close it there, then try again.');
     if(pending)throw new Error('Another mailbox operation is in progress');
-    const request={id:randomUUID(),action,...args};
+    // A fixed event ID makes Google refuse a second copy of the same create request.
+    const request={id:randomUUID(),action,...args,...action==='calendar_create'&&{eventId:randomUUID().replaceAll('-','')}};
     let timer;
     const result=await new Promise((resolve,reject)=>{
       pending={request,resolve,sent:false};
@@ -112,8 +130,10 @@ server.setRequestHandler(CallToolRequestSchema,async({params})=>{
         reject(new Error('Chrome extension unavailable or operation timed out' +
           (mayHaveOpened ? '; the thread may have been opened and marked read. Do not retry automatically.' : '') +
           (delivered&&action==='archive' ? '; the thread may already be archived. Inspect Gmail before retrying.' : '') +
-          (delivered&&action==='draft' ? '; an unsent draft may exist. Inspect Drafts before retrying.' : '')));
-      },60000);
+          (delivered&&action==='draft' ? '; an unsent draft may exist. Inspect Drafts before retrying.' : '') +
+          (delivered&&action==='send' ? '; the email may have been sent. Check Sent and Drafts before retrying.' : '') +
+          (delivered&&action==='calendar_create' ? '; the event may exist. Check with get_event, eventId '+request.eventId+', before retrying.' : '')));
+      },action==='send'?150000:60000);
       deliver();
     }).finally(()=>clearTimeout(timer));
     if(result.error)throw new Error(result.error);

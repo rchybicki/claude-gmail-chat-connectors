@@ -27,6 +27,17 @@ test('gmail setup writes a private key file and keeps other Claude servers',{ski
   assert.equal(setup('gmail','jan.kowalski@randstad.com').status,0);
   assert.equal(JSON.parse(readFileSync(bridge,'utf8')).token,key.token,'rerun keeps the token so the extension needs no reload');
 });
+test('send and calendar write are off by default and set again on each run',{skip:process.platform==='win32'},()=>{
+  writeFileSync(claudeConfig,'{}');
+  const options=()=>{const {allowSend,allowCalendarWrite}=JSON.parse(readFileSync(bridge,'utf8'));return [allowSend,allowCalendarWrite];};
+  assert.equal(setup('gmail','jan.kowalski@randstad.com').status,0);assert.deepEqual(options(),[false,false]);
+  const on=setup('gmail','jan.kowalski@randstad.com','--allow-send','--allow-calendar-write');
+  assert.equal(on.status,0);assert.deepEqual(options(),[true,true]);assert.match(on.stdout,/send email: yes.*create calendar events: yes/);
+  assert.equal(setup('gmail','jan.kowalski@randstad.com','--allow-calendar-write').status,0);assert.deepEqual(options(),[false,true]);
+  const before=readFileSync(bridge,'utf8');
+  for(const args of [['gmail','jan.kowalski@randstad.com','--allow-everything'],['chat','jan.kowalski@randstad.com','--allow-send']]) assert.notEqual(setup(...args).status,0);
+  assert.equal(readFileSync(bridge,'utf8'),before);
+});
 test('bad input and unreadable Claude config change nothing',{skip:process.platform==='win32'},()=>{
   for(const args of [['gmail'],['gmail','not-an-email'],['chat'],['chat','not-an-email'],['other']]) assert.notEqual(setup(...args).status,0);
   const before=readFileSync(bridge,'utf8');

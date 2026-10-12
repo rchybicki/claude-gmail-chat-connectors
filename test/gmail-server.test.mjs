@@ -72,9 +72,11 @@ test('MCP discovery, bridge authentication, routing and error propagation',async
   } finally {await client.close();}
 });
 test('invalid local configuration stops the server before it listens',()=>{
-  writeFileSync(join(dir,'gmail','extension','bridge-local.json'),JSON.stringify({account:expectedAccount,token:'short',port}));
-  const run=spawnSync(process.execPath,[join(dir,'gmail','server.mjs')],{input:'',encoding:'utf8',timeout:10000});
-  assert.notEqual(run.status,0);assert.match(run.stderr,/Invalid local configuration/);
+  for(const config of [{token:'short'},{token,allowSend:'yes'},{token,allowCalendarWrite:1}]) {
+    writeFileSync(join(dir,'gmail','extension','bridge-local.json'),JSON.stringify({account:expectedAccount,port,...config}));
+    const run=spawnSync(process.execPath,[join(dir,'gmail','server.mjs')],{input:'',encoding:'utf8',timeout:10000});
+    assert.notEqual(run.status,0);assert.match(run.stderr,/Invalid local configuration/);
+  }
 });
 test('a second copy keeps running while another app owns the port, then takes it over',async()=>{
   writeFileSync(join(dir,'gmail','extension','bridge-local.json'),JSON.stringify({account:expectedAccount,token,port}));
@@ -97,4 +99,28 @@ test('a second copy keeps running while another app owns the port, then takes it
     await respond({id:request.id,data:{account:expectedAccount}});
     assert.equal((await call).isError,undefined);
   } finally {await client.close();blocker.close();}
+});
+test('send and calendar create exist only when setup turned them on, and are checked and routed',async()=>{
+  writeFileSync(join(dir,'gmail','extension','bridge-local.json'),JSON.stringify({account:expectedAccount,token,port,allowSend:true,allowCalendarWrite:true}));
+  const client=new Client({name:'write-options',version:'1.0.0'});
+  try {
+    await client.connect(new StdioClientTransport({command:process.execPath,args:[join(dir,'gmail','server.mjs')],stderr:'pipe'}));
+    const names=(await client.listTools()).tools.map(t=>t.name);
+    assert.ok(names.includes('send_email')&&names.includes('create_event'));
+    for(const args of [{to:'a@b.com',subject:'x',body:'y',cc:'c@d.com'},{to:'a@b.com, c@d.com',subject:'x',body:'y'},{to:'a@b.com',subject:'x"',body:'y'}])
+      assert.equal((await client.callTool({name:'send_email',arguments:args})).isError,true);
+    const day={title:'Planning',start:'2026-10-14',end:'2026-10-15'};
+    for(const args of [{...day,end:'2026-10-14'},{...day,start:'2026-10-14T09:00:00+02:00'},{...day,start:'2026-02-30',end:'2026-03-01'},{...day,title:' '},{...day,attendees:'a@b.com'},{...day,attendees:['a@b.com','a@b.com']},{...day,attendees:['not an email']},{...day,eventId:'mine'},{...day,description:7}])
+      assert.equal((await client.callTool({name:'create_event',arguments:args})).isError,true);
+    const create=client.callTool({name:'create_event',arguments:{...day,attendees:['a@randstad.com']}});
+    const request=await nextRequest();
+    assert.equal(request.action,'calendar_create');assert.match(request.eventId,/^[0-9a-f]{32}$/);assert.deepEqual(request.attendees,['a@randstad.com']);
+    await respond({id:request.id,data:{account:expectedAccount,status:'created'}});
+    assert.equal((await create).isError,undefined);
+    const send=client.callTool({name:'send_email',arguments:{to:'a@randstad.com',subject:'Hello',body:'Text'}});
+    const request2=await nextRequest();
+    assert.equal(request2.action,'send');assert.equal(request2.to,'a@randstad.com');
+    await respond({id:request2.id,error:'Send not confirmed'});
+    assert.equal((await send).isError,true);
+  } finally {await client.close();}
 });
