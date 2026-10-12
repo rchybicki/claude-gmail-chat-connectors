@@ -24,7 +24,7 @@ async function bridge(answer,calendarPage,settings={},gmailTabs=[{id:1}]) {
     alarms:{create(){},onAlarm:{addListener(){}}},
     tabs:{query:async()=>gmailTabs,create:async({url,windowId})=>{tabs.push('open '+url+' in '+windowId);return {id:8};},remove:async id=>{tabs.push('close '+id);}},
     windows:{create:async({url,state,focused})=>{tabs.push('window '+state+' '+focused+' '+url);return {id:9,state,tabs:[{id:7}]};}},
-    scripting:{executeScript:async({args:[args]})=>{pageCalls.push(args.action);return [{result:args.action.startsWith('calendar_')?calendarPage(args,pageCalls.length):{account,baseUrl:'https://mail.google.com/mail/u/0/'}}];}}};
+    scripting:{executeScript:async({args:[args]})=>{pageCalls.push(args.action);return [{result:args.action==='identity'?{account,baseUrl:'https://mail.google.com/mail/u/0/'}:calendarPage(args,pageCalls.length)}];}}};
   const context={fetch,chrome,crypto:globalThis.crypto,TextEncoder,AbortSignal,URL,setTimeout,gmailPageOperation(){},extractReadThread(){},prepareDraft(){},calendarPageOperation(){}};
   vm.createContext(context);vm.runInContext(source,context);
   await finished;
@@ -79,4 +79,11 @@ test('without an open Gmail tab, the account is checked in a tab of a minimized 
   assert.deepEqual(pageCalls,['identity']);
   assert.deepEqual(tabs,['window minimized false https://mail.google.com/mail/u/?authuser='+encodeURIComponent(account),'close 7']);
   assert.equal(JSON.parse(sent.find(s=>s.url.endsWith('/response')).body).data.account,account);
+});
+test('send refuses when the subject search finds anything, also another subject, and opens no composer',async()=>{
+  const request={id:'s1',action:'send',to:'a@randstad.com',subject:'Planning',body:'x'};
+  const {sent,pageCalls,tabs}=await bridge(signed(request),args=>({account,visibleCount:50,emails:[{subject:'Planning 0'}]}),{allowSend:true});
+  assert.deepEqual(pageCalls,['identity','search']);
+  assert.match(JSON.parse(sent.find(s=>s.url.endsWith('/response')).body).error,/already uses this subject.*Nothing was sent/);
+  assert.equal(tabs.at(-1),'close 7');
 });

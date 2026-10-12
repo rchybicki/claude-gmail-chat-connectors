@@ -113,7 +113,7 @@ Do not move or delete the folder after setup: Claude runs the connectors from it
 - Claude reads **unread** emails only if you allow that, because reading marks them as read.
 - Without `--allow-send`, Claude writes email **drafts** only. Open Gmail → Drafts, check the draft,
   and send it yourself. With `--allow-send`, Claude sends new emails to one person, without
-  attachments. It does not send the same subject to the same person twice.
+  attachments. It refuses a subject that a draft or sent email to the same person already uses.
 - Drafts and emails can have simple formatting: bold, italic, links, bullet and numbered lists.
   Claude writes them in Markdown; other formatting, images and attachments are not supported.
 - With `--allow-calendar-write`, Claude can create events. If the event has guests, Google emails
@@ -127,7 +127,7 @@ Do not move or delete the folder after setup: Claude runs the connectors from it
 
 | What you see | What to do |
 |---|---|
-| "Chrome extension unavailable or operation timed out" | Open Chrome. Wait 30 seconds and try again. |
+| "Chrome extension unavailable or operation timed out" | Open Chrome. Wait 30 seconds and try again. After `send_email` or `create_event`, first check Sent or the calendar: the action may have worked. |
 | "Sign in to Gmail with the configured account" | Sign in to Gmail with your work account in this Chrome profile. |
 | "Gmail account identity missing or mismatched" | Gmail shows another account, or Gmail is not in English. |
 | "Port 3456 is in use" | Another Claude app or session uses Gmail. Close it there and try again. |

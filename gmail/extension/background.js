@@ -78,7 +78,8 @@ async function run(request) {
   if (base.origin !== 'https://mail.google.com' || !/^\/mail\/u\/\d+\/$/.test(base.pathname)) throw new Error('Unsupported Gmail account URL');
   if(request.action==='draft'||request.action==='send') {
     const send=request.action==='send';
-    // Send also refuses a subject already sent to this recipient, so a repeated request cannot send twice.
+    // Send refuses any draft or sent email that the subject search finds for this recipient. Search shows at
+    // most one page, so only an empty result proves no earlier email; then any match in Sent is the new one.
     const query=(send?'{in:drafts in:sent}':'in:drafts')+' subject:"'+request.subject+'" to:'+request.to;
     const sentQuery='in:sent subject:"'+request.subject+'" to:'+request.to;
     const tab=await openTab(base.href+'#search/'+encodeURIComponent(query));
@@ -90,8 +91,8 @@ async function run(request) {
       for(let i=0;i<40;i++) {
         try {
           const existing=await page(tab.id,gmailPageOperation,{action:'search',expectedAccount:ACCOUNT,query,limit:50});
-          if(existing.emails.some(e=>e.subject===request.subject)){
-            if(send){await done();throw Object.assign(new Error('A draft or sent email with this subject and recipient already exists. Nothing was sent; use another subject.'),{final:true});}
+          if(send?existing.visibleCount>0:existing.emails.some(e=>e.subject===request.subject)){
+            if(send){await done();throw Object.assign(new Error('A draft or sent email to this recipient already uses this subject or contains it. Nothing was sent; use another subject.'),{final:true});}
             return done({account:ACCOUNT,status:'existing_draft',sent:false,url:base.href+'#drafts',note:'A draft with this subject and recipient already exists; no draft was created or changed.'});
           }
           ready=true;break;

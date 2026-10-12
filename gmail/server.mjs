@@ -138,7 +138,8 @@ server.setRequestHandler(CallToolRequestSchema,async({params})=>{
       },action==='send'?150000:60000);
       deliver();
     }).finally(()=>clearTimeout(timer));
-    if(result.error)throw new Error(result.error);
+    // A create may have reached Google before the error; the event ID lets Claude check first.
+    if(result.error)throw new Error(result.error+(action==='calendar_create'?'. The event may exist: check with get_event, calendarId '+(args.calendarId||'primary')+', eventId '+request.eventId+', before retrying.':''));
     return {content:[{type:'text',text:JSON.stringify(result.data)}]};
   }catch(error){return {isError:true,content:[{type:'text',text:error.message}]};}
 });

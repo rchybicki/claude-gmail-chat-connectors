@@ -117,6 +117,11 @@ test('send and calendar create exist only when setup turned them on, and are che
     assert.equal(request.action,'calendar_create');assert.match(request.eventId,/^[0-9a-f]{32}$/);assert.deepEqual(request.attendees,['a@randstad.com']);
     await respond({id:request.id,data:{account:expectedAccount,status:'created'}});
     assert.equal((await create).isError,undefined);
+    const lost=client.callTool({name:'create_event',arguments:day});
+    const lostRequest=await nextRequest();
+    await respond({id:lostRequest.id,error:'The operation was aborted due to timeout'});
+    const failure=await lost;
+    assert.equal(failure.isError,true);assert.match(failure.content[0].text,new RegExp('may exist.*calendarId primary, eventId '+lostRequest.eventId));
     const send=client.callTool({name:'send_email',arguments:{to:'a@randstad.com',subject:'Hello',body:'Text'}});
     const request2=await nextRequest();
     assert.equal(request2.action,'send');assert.equal(request2.to,'a@randstad.com');
