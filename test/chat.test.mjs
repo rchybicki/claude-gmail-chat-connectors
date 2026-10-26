@@ -13,7 +13,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const fake = pathToFileURL(join(root, 'test', 'fake-google.mjs')).href;
 const desktopClient = {installed: {client_id: 'cid.apps.googleusercontent.com', client_secret: 'csecret', auth_uri: 'https://accounts.google.com/o/oauth2/auth', token_uri: 'https://oauth2.googleapis.com/token'}};
 const ACCOUNT = 'Jan.Kowalski@randstad.com';
-const ALL_SCOPES = 'openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/chat.spaces.readonly https://www.googleapis.com/auth/chat.memberships.readonly https://www.googleapis.com/auth/chat.messages.readonly https://www.googleapis.com/auth/chat.messages.create';
+const ALL_SCOPES = 'openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/chat.spaces.readonly https://www.googleapis.com/auth/chat.memberships.readonly https://www.googleapis.com/auth/chat.messages.readonly https://www.googleapis.com/auth/chat.messages.create https://www.googleapis.com/auth/chat.spaces.create';
 
 // Copies only the source files into a temp chat/ folder, so real token files are never read or written.
 function tempChat(t, files = {}) {
@@ -39,16 +39,16 @@ async function startServer(t, files = {'google-client.json': desktopClient, 'tok
   };
 }
 
-test('lists the seven tools with correct annotations', async t => {
+test('lists the nine tools with correct annotations', async t => {
   const chat = tempChat(t, {});
   const client = new Client({name: 'test', version: '1'});
   await client.connect(new StdioClientTransport({command: process.execPath, args: ['--import', fake, join(chat, 'server.mjs')], stderr: 'pipe'}));
   t.after(() => client.close());
   const {tools} = await client.listTools();
-  assert.deepEqual(tools.map(x => x.name), ['list_spaces', 'get_space', 'list_members', 'list_messages', 'get_message', 'search_messages', 'send_message']);
+  assert.deepEqual(tools.map(x => x.name), ['list_spaces', 'get_space', 'list_members', 'list_messages', 'get_message', 'search_messages', 'send_message', 'find_direct_message', 'start_chat']);
   for (const x of tools) {
     assert.equal(x.inputSchema.additionalProperties, false);
-    assert.equal(x.annotations.readOnlyHint, x.name !== 'send_message');
+    assert.equal(x.annotations.readOnlyHint, !['send_message', 'start_chat'].includes(x.name));
   }
   assert.deepEqual(tools.at(-1).annotations, {readOnlyHint: false, destructiveHint: false, openWorldHint: true});
 });
@@ -108,6 +108,32 @@ test('send_message without a thread generates a requestId and no reply option', 
   assert.deepEqual(r.message.body, {text: 'Hi'});
 });
 
+test('find_direct_message looks up an email or a user ID', async t => {
+  const call = await startServer(t);
+  assert.equal((await call('find_direct_message', {person: 'anna.nowak@randstad.com'})).url, 'https://chat.googleapis.com/v1/spaces:findDirectMessage?name=users%2Fanna.nowak%40randstad.com');
+  assert.equal((await call('find_direct_message', {person: 'users/1234'})).url, 'https://chat.googleapis.com/v1/spaces:findDirectMessage?name=users%2F1234');
+});
+
+test('start_chat starts a DM for one person and a group chat for more', async t => {
+  const call = await startServer(t);
+  const requestId = '123e4567-e89b-42d3-a456-426614174000';
+  const dm = await call('start_chat', {people: ['anna.nowak@randstad.com'], requestId});
+  assert.equal(dm.requestId, requestId);
+  assert.equal(dm.space.method, 'POST');
+  assert.equal(dm.space.url, 'https://chat.googleapis.com/v1/spaces:setup');
+  assert.deepEqual(dm.space.body, {requestId, space: {spaceType: 'DIRECT_MESSAGE'}, memberships: [{member: {name: 'users/anna.nowak@randstad.com', type: 'HUMAN'}}]});
+  const group = await call('start_chat', {people: ['anna.nowak@randstad.com', 'users/1234']});
+  assert.match(group.requestId, /^[0-9a-f-]{36}$/);
+  assert.equal(group.space.body.requestId, group.requestId);
+  assert.equal(group.space.body.space.spaceType, 'GROUP_CHAT');
+  assert.deepEqual(group.space.body.memberships.map(m => m.member.name), ['users/anna.nowak@randstad.com', 'users/1234']);
+});
+
+test('an older sign-in without the start-chat permission asks for setup again', async t => {
+  const call = await startServer(t);
+  assert.match((await call('start_chat', {people: ['noscope@x.com']})).error, /older version.*node setup\.mjs chat <email>.*\(requestId [0-9a-f-]{36}; reuse it/);
+});
+
 test('bad input is rejected before any request', async t => {
   const call = await startServer(t);
   const bad = [
@@ -125,6 +151,12 @@ test('bad input is rejected before any request', async t => {
     ['send_message', {spaceId: 'AAA'}, /Missing argument: text/],
     ['list_spaces', {foo: 1}, /Unknown argument: foo/],
     ['get_space', {spaceId: 'AAA', __proto__x: 1}, /Unknown argument/],
+    ['find_direct_message', {person: 'jan'}, /Invalid person/],
+    ['find_direct_message', {person: 'users/../x'}, /Invalid person/],
+    ['start_chat', {people: []}, /Invalid people/],
+    ['start_chat', {people: 'a@x.com'}, /Invalid people/],
+    ['start_chat', {people: ['a@x.com', 'spaces/AAA']}, /Invalid people/],
+    ['start_chat', {people: Array.from({length: 50}, (_, i) => `p${i}@x.com`)}, /Invalid people/],
     ['delete_space', {}, /Unknown tool/]
   ];
   for (const [name, args, pattern] of bad) assert.match((await call(name, args)).error, pattern, name);
@@ -173,7 +205,7 @@ test('authorize saves the token for the right account with PKCE', async t => {
   assert.equal(authUrl.origin + authUrl.pathname, 'https://accounts.google.com/o/oauth2/auth');
   assert.match(p.get('redirect_uri'), /^http:\/\/127\.0\.0\.1:\d+$/);
   for (const [k, v] of [['access_type', 'offline'], ['prompt', 'consent'], ['login_hint', ACCOUNT], ['code_challenge_method', 'S256'], ['response_type', 'code']]) assert.equal(p.get(k), v);
-  assert.match(p.get('scope'), /^openid email .*chat\.messages\.create$/);
+  assert.match(p.get('scope'), /^openid email .*chat\.messages\.create .*chat\.spaces\.create$/);
   const exchange = new URLSearchParams(requests.slice(before).find(r => r.url === 'https://oauth2.googleapis.com/token').body);
   assert.equal(createHash('sha256').update(exchange.get('code_verifier')).digest('base64url'), p.get('code_challenge'));
   assert.equal(exchange.get('redirect_uri'), p.get('redirect_uri'));

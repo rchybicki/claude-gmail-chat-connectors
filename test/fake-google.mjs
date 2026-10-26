@@ -23,6 +23,7 @@ globalThis.fetch = async (input, init = {}) => {
   if (url.href === 'https://oauth2.googleapis.com/revoke') return reply(new URLSearchParams(body).get('token') === 'google-down' ? 503 : 200, {});
   if (url.hostname === 'chat.googleapis.com') {
     if (url.pathname.includes('notfound')) return reply(404, {error: {code: 404, message: 'Space not found', status: 'NOT_FOUND'}});
+    if ((url.href + body).includes('noscope')) return reply(403, {error: {code: 403, message: 'Request had insufficient authentication scopes.', status: 'PERMISSION_DENIED', details: [{reason: 'ACCESS_TOKEN_SCOPE_INSUFFICIENT'}]}});
     const authOk = new Headers(init.headers).get('authorization') === `Bearer ${ACCESS_TOKEN}`;
     return reply(200, {method, url: url.href, body: body && JSON.parse(body), authOk, refreshes, fetches: requests.length});
   }

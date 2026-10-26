@@ -23,6 +23,8 @@ async function api(method, path, query, body) {
   const res = await fetch(url, {method, signal: AbortSignal.timeout(30_000), body: body && JSON.stringify(body),
     headers: {Authorization: `Bearer ${await accessToken()}`, ...(body && {'Content-Type': 'application/json'})}});
   const data = await res.json().catch(() => ({}));
+  if (data.error?.details?.some(d => d.reason === 'ACCESS_TOKEN_SCOPE_INSUFFICIENT'))
+    throw new Error('Your Google Chat sign-in is from an older version and does not allow this. In the connector folder, run the chat setup again: node setup.mjs chat <email>');
   if (!res.ok) throw new Error(`Google Chat API error ${res.status}: ${data.error?.message || res.statusText}`);
   return data;
 }
@@ -31,6 +33,9 @@ const spaceId = {type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$', description:
 const pageSize = (maximum, def) => ({type: 'integer', minimum: 1, maximum, ...(def && {default: def})});
 const pageToken = {type: 'string', maxLength: 4096, description: 'nextPageToken from the previous page'};
 const filter = {type: 'string', maxLength: 2000, description: 'Google Chat API filter'};
+const person = {type: 'string', maxLength: 320, pattern: '^([^@/\\s]+@[^@/\\s]+|users/[0-9]{1,64})$', description: 'Email address, or users/{id} from list_members'};
+const user = p => p.startsWith('users/') ? p : `users/${p}`;
+const uuid = {type: 'string', pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$', description: 'UUID for safe retries; generated if omitted'};
 const tools = [
   {name: 'list_spaces', description: 'List the Google Chat spaces, group chats and direct messages the user belongs to.',
     properties: {pageSize: pageSize(1000, 100), pageToken, filter}, run: a => api('GET', 'spaces', a)},
@@ -49,15 +54,28 @@ const tools = [
     run: a => api('POST', 'spaces/-/messages:search', {}, {filter: a.query, pageSize: a.pageSize, pageToken: a.pageToken})},
   {name: 'send_message', write: true, description: 'Send a text message to a Google Chat space AS THE USER. Before calling, confirm the space and the exact text with the user. The result includes requestId; after a timeout or error, never retry with a new requestId (reuse the same one, or check the space first).',
     properties: {spaceId, text: {type: 'string', minLength: 1, maxLength: 32000}, threadName: {type: 'string', pattern: '^spaces/[A-Za-z0-9_-]{1,128}/threads/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,255}$', description: 'Reply in this thread (spaces/{space}/threads/{thread}); must belong to spaceId'},
-      requestId: {type: 'string', pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$', description: 'UUID for safe retries; generated if omitted'}}, required: ['spaceId', 'text'],
+      requestId: uuid}, required: ['spaceId', 'text'],
     run: async ({spaceId, text, threadName, requestId = randomUUID()}) => {
       if (threadName && !threadName.startsWith(`spaces/${spaceId}/threads/`)) throw new Error('threadName must belong to spaceId');
       try {
         return {requestId, message: await api('POST', `spaces/${e(spaceId)}/messages`, {requestId, messageReplyOption: threadName && 'REPLY_MESSAGE_OR_FAIL'},
           {text, ...(threadName && {thread: {name: threadName}})})};
       } catch (error) { throw new Error(`${error.message} (requestId ${requestId}; reuse it for any retry)`); }
+    }},
+  {name: 'find_direct_message', description: 'Find the existing direct message with one person. Returns an error 404 if there is none; then use start_chat.',
+    properties: {person}, required: ['person'], run: a => api('GET', 'spaces:findDirectMessage', {name: user(a.person)})},
+  {name: 'start_chat', write: true, description: 'Start a Google Chat conversation AS THE USER and return its space; then use send_message with its ID. One person starts a direct message (an existing one is returned, not duplicated). Two or more people start a NEW group chat on every call, so check list_spaces and list_members for an existing one first. Google silently leaves out people the user cannot add; check with list_members. Before calling, confirm the people with the user. After a timeout or error, retry only with the same requestId.',
+    properties: {people: {type: 'array', items: person, minItems: 1, maxItems: 49, description: 'The other people; the user is added automatically'}, requestId: uuid}, required: ['people'],
+    run: async ({people, requestId = randomUUID()}) => {
+      try {
+        return {requestId, space: await api('POST', 'spaces:setup', {}, {requestId, space: {spaceType: people.length === 1 ? 'DIRECT_MESSAGE' : 'GROUP_CHAT'},
+          memberships: people.map(p => ({member: {name: user(p), type: 'HUMAN'}}))})};
+      } catch (error) { throw new Error(`${error.message} (requestId ${requestId}; reuse it for any retry)`); }
     }}
 ];
+const valid = (s, v) => s.type === 'integer' ? Number.isInteger(v) && v >= s.minimum && v <= s.maximum
+  : s.type === 'array' ? Array.isArray(v) && v.length >= s.minItems && v.length <= s.maxItems && v.every(x => valid(s.items, x))
+  : typeof v === 'string' && v.length >= (s.minLength ?? 1) && v.length <= (s.maxLength ?? Infinity) && (!s.pattern || new RegExp(s.pattern).test(v)) && (!s.enum || s.enum.includes(v));
 const schema = t => ({type: 'object', properties: t.properties, required: t.required, additionalProperties: false});
 const server = new Server({name: 'google-chat', version: '1.0.0'}, {capabilities: {tools: {}}});
 server.setRequestHandler(ListToolsRequestSchema, async () => ({tools: tools.map(t => ({name: t.name, description: t.description, inputSchema: schema(t),
@@ -70,12 +88,7 @@ server.setRequestHandler(CallToolRequestSchema, async ({params}) => {
     const args = params.arguments || {};
     for (const k of Object.keys(args)) if (!Object.hasOwn(tool.properties, k)) throw new Error(`Unknown argument: ${k}`);
     for (const k of tool.required || []) if (args[k] === undefined) throw new Error(`Missing argument: ${k}`);
-    for (const [k, v] of Object.entries(args)) {
-      const s = tool.properties[k];
-      if (s.type === 'integer' ? !(Number.isInteger(v) && v >= s.minimum && v <= s.maximum)
-        : typeof v !== 'string' || v.length < (s.minLength ?? 1) || v.length > (s.maxLength ?? Infinity) || (s.pattern && !new RegExp(s.pattern).test(v)) || (s.enum && !s.enum.includes(v)))
-        throw new Error(`Invalid ${k}`);
-    }
+    for (const [k, v] of Object.entries(args)) if (!valid(tool.properties[k], v)) throw new Error(`Invalid ${k}`);
     const defaults = Object.fromEntries(Object.entries(tool.properties).filter(([, s]) => s.default !== undefined).map(([k, s]) => [k, s.default]));
     return {content: [{type: 'text', text: JSON.stringify(await tool.run({...defaults, ...args}))}]};
   } catch (error) { return {isError: true, content: [{type: 'text', text: error.message}]}; }

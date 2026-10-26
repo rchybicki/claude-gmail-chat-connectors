@@ -13,13 +13,14 @@ You can ask Claude, for example:
 - If you turn them on: "Email Anna that I will be 10 minutes late." "Book 30 minutes with Piotr on Friday at 10."
 - "What did people say in the Project Phoenix chat space today?"
 - "Search Google Chat for messages about the new rate card."
+- "Start a chat with Anna and Piotr and ask them about Friday."
 
 The two parts are separate. You can install only Gmail, only Google Chat, or both.
 
 | | Gmail (`gmail-chrome`) | Google Chat (`google-chat`) |
 |---|---|---|
 | How it connects | A Chrome extension opens Gmail and Google Calendar in a minimized Chrome window of its own, with your Chrome sign-in | Google's official Chat API, with your sign-in |
-| Claude can | Search, read, write drafts, archive one email at a time; read your calendars and events. Only if you turn them on: send an email, create an event | List spaces, read messages, search, send a message |
+| Claude can | Search, read, write drafts, archive one email at a time; read your calendars and events. Only if you turn them on: send an email, create an event | List spaces, read messages, search, send a message, start a direct message or group chat |
 | Claude cannot | Delete, label, read attachments, reply in a thread; change, delete or answer events | Delete, edit or react to messages |
 | Needs | Chrome running and signed in to your work Google account, Gmail in English | Nothing open |
 
@@ -60,10 +61,11 @@ risks remain. In short:
   allows for this data.
 - **Your company's IT has not reviewed this tool.** Use it in line with your company's data
   rules. Your company can block the Google Chat part at any time.
-- **Claude acts as you.** A Google Chat message, and with the options an email or a calendar
+- **Claude acts as you.** A Google Chat message or new chat, and with the options an email or a calendar
   invitation, that Claude sends shows your name. Claude asks before it uses a tool. Read the
-  message before you click "Allow". Do not choose "Always allow" for `send_message`,
-  `send_email` or `create_event`.
+  message before you click "Allow". Claude can start a chat with any email address, also outside
+  your company: check the people before you allow `start_chat`. Do not choose "Always allow" for
+  `send_message`, `start_chat`, `send_email` or `create_event`.
 - **Google shows a warning.** The Google Chat app "Claude Connectors (Radek Chybicki)" is not
   verified by Google, because a person made it, not a company. Google shows the app name and
   the developer address `rchybicki@gmail.com`. Continue only if you trust that person.
@@ -141,6 +143,9 @@ After you update Node.js or move the folder, run the setup commands again.
 
 In the folder, run `git pull` and `npm ci --ignore-scripts`. Check what changed first (`git log -p`), because an update runs new code. For Gmail, also click the reload button of
 "Gmail for Claude" at `chrome://extensions`.
+
+If Claude says that your Google Chat sign-in is from an older version, run
+`node setup.mjs chat <your email>` once more. Claude can then start new chats.
 
 ## Remove
 

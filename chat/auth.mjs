@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, chmodSync, rmSync, existsSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
 const tokenPath = new URL('token.json', import.meta.url), clientPath = new URL('google-client.json', import.meta.url);
-const CHAT_SCOPES = ['spaces.readonly', 'memberships.readonly', 'messages.readonly', 'messages.create'].map(s => `https://www.googleapis.com/auth/chat.${s}`);
+const CHAT_SCOPES = ['spaces.readonly', 'memberships.readonly', 'messages.readonly', 'messages.create', 'spaces.create'].map(s => `https://www.googleapis.com/auth/chat.${s}`);
 const page = ok => `<!doctype html><meta charset="utf-8"><title>Google Chat setup</title><p>Google Chat sign-in ${ok ? 'finished' : 'failed; see the setup window'}. You can close this tab.</p>`;
 
 // google-client.json is a Google "Desktop app" client. Google treats its secret as not confidential:

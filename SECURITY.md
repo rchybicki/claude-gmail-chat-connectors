@@ -13,10 +13,13 @@ the code against it.
   change, delete or answer events.
 - Two options are off unless you turn them on in setup: `--allow-send` lets Claude send an email
   as you, and `--allow-calendar-write` lets Claude create events, which invites the guests.
-- Google Chat: Claude can read and search your spaces and messages, and send a message as you.
-  The Google permissions are exactly: `openid`, `email` (to confirm your account),
-  `chat.spaces.readonly`, `chat.memberships.readonly`, `chat.messages.readonly` and
-  `chat.messages.create`.
+- Google Chat: Claude can read and search your spaces and messages, send a message as you, and
+  start a direct message or group chat as you. The Google permissions are exactly: `openid`,
+  `email` (to confirm your account), `chat.spaces.readonly`, `chat.memberships.readonly`,
+  `chat.messages.readonly`, `chat.messages.create` and `chat.spaces.create`. Google lets
+  `chat.spaces.create` also create named spaces; the connector only starts direct messages and
+  group chats. Claude can start a chat with any email address, also outside your company, unless
+  your company's Google settings block external chats.
 - No known security defects. `npm audit` reports no known vulnerabilities.
 - Some risks come with any tool of this kind. They are listed below, each with what you can do
   about it.
@@ -33,7 +36,8 @@ the code against it.
    text goes to the Claude model. Use a Claude account that your company allows for this data.
 3. **Text in emails, messages or web pages can try to give Claude instructions** ("prompt
    injection"). For example, an email could ask Claude to post your recent mail into a Chat space.
-   Without `--allow-send`, Gmail cannot send. Data could leak through `send_message` in Google Chat,
+   Without `--allow-send`, Gmail cannot send. Data could leak through `send_message` in Google Chat (also to an outside address after
+   `start_chat` opens a chat with it),
    through `send_email` and through the guest list or description of `create_event` if you turned
    them on, and in Claude Code
    also through shell commands, web requests or your other connectors. Setup adds both
@@ -41,11 +45,11 @@ the code against it.
    untrusted code or web pages. Protections:
    - Gmail has no send tool, and Calendar no create tool, unless you turn them on.
    - Claude asks you before it uses a tool. Read what it wants to do before you click "Allow".
-   - Do not choose "Always allow" for `send_message`, `send_email`, `create_event`,
+   - Do not choose "Always allow" for `send_message`, `start_chat`, `send_email`, `create_event`,
      `create_email_draft`, `archive_email` or `read_email_and_mark_read`, and do not let Claude Code approve tools or commands
      automatically ("bypass permissions" or auto-approve) while the connectors are on.
    - If you want the smallest risk, install only Gmail, without the two options.
-4. **Claude acts as you.** A Google Chat message, and with the options an email or a calendar
+4. **Claude acts as you.** A Google Chat message or new chat, and with the options an email or a calendar
    invitation, that Claude sends shows your name.
 5. **The Google app is run by a person, not a company.** "Claude Connectors (Radek Chybicki)"
    is not verified by Google, so Google shows a warning.
