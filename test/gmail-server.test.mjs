@@ -100,7 +100,7 @@ test('invalid local configuration stops the server before it listens',()=>{
 });
 test('a second copy keeps running while another app owns the port, then takes it over',async()=>{
   writeFileSync(join(dir,'gmail','extension','bridge-local.json'),JSON.stringify({account:expectedAccount,token,port}));
-  const blocker=createServer().listen(port,'127.0.0.1');
+  const blocker=createServer(socket=>socket.destroy()).listen(port,'127.0.0.1');
   await new Promise(r=>blocker.once('listening',r));
   const client=new Client({name:'second-copy',version:'1.0.0'});
   try {
@@ -114,6 +114,7 @@ test('a second copy keeps running while another app owns the port, then takes it
     assert.doesNotMatch(stderr,/MaxListeners/,'failed attempts leave no listeners behind');
     await new Promise(r=>blocker.close(r));
     const call=client.callTool({name:'account_identity',arguments:{}});
+    for(let i=0;!(await fetch(base+'/session').then(r=>r.ok,()=>false));i++){assert.ok(i<100,'the server takes the port');await new Promise(r=>setTimeout(r,50));}
     const request=await nextRequest();
     assert.equal(request.action,'identity');
     await respond({id:request.id,data:{account:expectedAccount}});
