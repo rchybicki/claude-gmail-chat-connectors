@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { randomBytes, randomUUID, createHmac } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
+import vm from 'node:vm';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -25,6 +27,14 @@ async function nextRequest(nonce=randomUUID(),waiting=poll(nonce)){
   return JSON.parse(payload);
 }
 const respond=(body,signature=sign('response\n'+JSON.stringify(body)))=>fetch(base+'/response',{method:'POST',headers:{'Content-Type':'application/json','X-Signature':signature},body:JSON.stringify(body)});
+// Runs the real extension against whatever listens on the port, until a request to the port fails.
+const extensionSource=readFileSync(new URL('../gmail/extension/background.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
+function runExtension() {
+  const chrome={runtime:{getURL:()=>'config',getManifest:()=>({version:'test'}),onStartup:{addListener(){}},onInstalled:{addListener(){}}},alarms:{create(){},onAlarm:{addListener(){}}},
+    tabs:{query:async()=>[{id:1}],remove:async()=>{}},scripting:{executeScript:async()=>[{result:{account:expectedAccount,baseUrl:'https://mail.google.com/mail/u/0/'}}]}};
+  vm.runInNewContext(extensionSource,{chrome,crypto,TextEncoder,AbortSignal,URL,Blob,setTimeout,gmailPageOperation(){},extractReadThread(){},prepareDraft(){},calendarPageOperation(){},
+    fetch:async(url,options)=>url==='config'?{json:async()=>({account:expectedAccount,token,port})}:fetch(url,options)});
+}
 test('MCP discovery, bridge authentication, routing and error propagation',async()=>{
   const client=new Client({name:'local-trial-test',version:'1.0.0'});
   const transport=new StdioClientTransport({command:process.execPath,args:[join(dir,'gmail','server.mjs')],stderr:'pipe'});
@@ -127,5 +137,50 @@ test('send and calendar create exist only when setup turned them on, and are che
     assert.equal(request2.action,'send');assert.equal(request2.to,'a@randstad.com');
     await respond({id:request2.id,error:'Send not confirmed'});
     assert.equal((await send).isError,true);
+  } finally {await client.close();}
+});
+test('a poll that a program on the port caught gets nothing from a later server run',async()=>{
+  writeFileSync(join(dir,'gmail','extension','bridge-local.json'),JSON.stringify({account:expectedAccount,token,port}));
+  const startServer=async name=>{
+    const client=new Client({name,version:'1.0.0'});
+    await client.connect(new StdioClientTransport({command:process.execPath,args:[join(dir,'gmail','server.mjs')],stderr:'pipe'}));
+    return client;
+  };
+  // The program learns what it can from a real run, takes the port after that run ends, and keeps one poll of the extension.
+  const earlier=await startServer('earlier-run');
+  const learned=await (await fetch(base+'/session')).json();
+  await earlier.close();
+  let caught;
+  const captured=new Promise(resolve=>caught=resolve);
+  const impostor=createHttpServer((req,res)=>{
+    if(req.url!=='/poll')return res.end(JSON.stringify(learned));
+    caught({'X-Nonce':req.headers['x-nonce'],'X-Signature':req.headers['x-signature']});req.socket.destroy();
+  }).listen(port,'127.0.0.1');
+  await new Promise(r=>impostor.once('listening',r));
+  runExtension();
+  const headers=await captured;
+  await new Promise(r=>impostor.close(r));
+  const client=await startServer('later-run');
+  try {
+    const draft=client.callTool({name:'create_email_draft',arguments:{to:'anna@randstad.com',subject:'Offer',body:'Confidential salary offer'}});
+    const replay=await fetch(base+'/poll',{headers});
+    assert.doesNotMatch(await replay.text(),/Confidential/,'the caught poll gets no request');
+    assert.equal(replay.status,403);
+    const request=await nextRequest();
+    assert.equal(request.body,'Confidential salary offer','the extension still gets the request');
+    await respond({id:request.id,error:'Test finished'});
+    assert.equal((await draft).isError,true);
+  } finally {await client.close();}
+});
+test('the extension and the server work together through the bridge',async()=>{
+  writeFileSync(join(dir,'gmail','extension','bridge-local.json'),JSON.stringify({account:expectedAccount,token,port}));
+  const client=new Client({name:'extension-and-server',version:'1.0.0'});
+  try {
+    await client.connect(new StdioClientTransport({command:process.execPath,args:[join(dir,'gmail','server.mjs')],stderr:'pipe'}));
+    const call=client.callTool({name:'account_identity',arguments:{}});
+    runExtension();
+    const result=await call;
+    assert.equal(result.isError,undefined,result.content[0].text);
+    assert.equal(JSON.parse(result.content.at(-1).text).account,expectedAccount);
   } finally {await client.close();}
 });
