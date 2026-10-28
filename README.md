@@ -142,7 +142,7 @@ After you update Node.js or move the folder, run the setup commands again.
 ## Update
 
 In the folder, run `git pull` and `npm ci --ignore-scripts`. Check what changed first (`git log -p`), because an update runs new code. For Gmail, also click the reload button of
-"Gmail for Claude" at `chrome://extensions`.
+"Gmail for Claude" at `chrome://extensions`. Then restart the Claude desktop app and start a new Claude Code session.
 
 If Claude says that your Google Chat sign-in is from an older version, run
 `node setup.mjs chat <your email>` once more. Claude can then start new chats.
