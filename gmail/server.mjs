@@ -3,7 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
-import { randomUUID, timingSafeEqual, createHmac } from 'node:crypto';
+import { randomUUID, timingSafeEqual, createHmac, createDecipheriv, hkdfSync } from 'node:crypto';
 // allowSend and allowCalendarWrite are off unless setup turned them on.
 const {token,account,port,allowSend=false,allowCalendarWrite=false} = JSON.parse(readFileSync(new URL('./extension/bridge-local.json', import.meta.url)));
 if (!/^[a-f0-9]{64}$/.test(token) || !/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(account) || !Number.isInteger(port) || port<1024 || port>65535 ||
@@ -15,7 +15,10 @@ let poller = null;
 // that takes the port while this server is down cannot learn the key, and the extension
 // runs only requests signed for the nonce of its own poll. Polls are signed for the random
 // session of one server run, so a poll that such a program keeps is refused by every later run.
+// The extension seals each result (AES-256-GCM), because this server can end before the
+// result is ready and a program can take the port in that time.
 const session = randomUUID();
+const responseKey = Buffer.from(hkdfSync('sha256',Buffer.from(token,'hex'),Buffer.alloc(0),'response',32));
 const sign = text => createHmac('sha256',Buffer.from(token,'hex')).update(text).digest('hex');
 const valid = (signature,text) => {const a=Buffer.from(String(signature||'')),b=Buffer.from(sign(text));return a.length===b.length&&timingSafeEqual(a,b);};
 const usedNonces = new Set();
@@ -44,10 +47,16 @@ const bridge = createServer(async (req,res) => {
   }
   if (req.method==='POST' && req.url==='/response') {
     try {
-      let body='',size=0;
-      for await(const chunk of req) {size+=chunk.length;if(size>2_000_000){json(res,413,{error:'Response too large'});req.destroy();return;}body+=chunk;}
-      if (!valid(signature,'response\n'+body)) return json(res,403,{error:'Forbidden'});
-      const response=JSON.parse(body);
+      const chunks=[];let size=0;
+      for await(const chunk of req) {size+=chunk.length;if(size>2_000_000){json(res,413,{error:'Response too large'});req.destroy();return;}chunks.push(chunk);}
+      const sealed=Buffer.concat(chunks);
+      let text;
+      try {
+        const open=createDecipheriv('aes-256-gcm',responseKey,sealed.subarray(0,12),{authTagLength:16});
+        open.setAuthTag(sealed.subarray(-16));
+        text=Buffer.concat([open.update(sealed.subarray(12,-16)),open.final()]).toString();
+      } catch {return json(res,403,{error:'Forbidden'});}
+      const response=JSON.parse(text);
       if (!pending || response.id!==pending.request.id) return json(res,404,{error:'No matching request'});
       if (!response.error && response.data?.account!==account) return json(res,400,{error:'Account mismatch'});
       pending.resolve(response);pending=null;json(res,200,{ok:true});return;

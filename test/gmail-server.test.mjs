@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
-import { randomBytes, randomUUID, createHmac } from 'node:crypto';
+import { randomBytes, randomUUID, createHmac, createCipheriv, hkdfSync } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
@@ -29,7 +29,11 @@ async function nextRequest(nonce=randomUUID(),waiting=poll(nonce)){
   assert.equal(signature,sign('request\n'+nonce+'\n'+payload),'server signs each request for this poll');
   return JSON.parse(payload);
 }
-const respond=(body,signature=sign('response\n'+JSON.stringify(body)))=>fetch(base+'/response',{method:'POST',headers:{'Content-Type':'application/json','X-Signature':signature},body:JSON.stringify(body)});
+const responseKey=Buffer.from(hkdfSync('sha256',Buffer.from(token,'hex'),Buffer.alloc(0),'response',32));
+const respond=(body,key=responseKey)=>{
+  const iv=randomBytes(12),seal=createCipheriv('aes-256-gcm',key,iv);
+  return fetch(base+'/response',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:Buffer.concat([iv,seal.update(JSON.stringify(body)),seal.final(),seal.getAuthTag()])});
+};
 // Runs the real extension against whatever listens on the port, until a request to the port fails.
 const extensionSource=readFileSync(new URL('../gmail/extension/background.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
 function runExtension() {
@@ -59,7 +63,7 @@ test('MCP discovery, bridge authentication, routing and error propagation',async
     const archive=client.callTool({name:'archive_email',arguments:{query:'subject:test',emailId:'123456789abcdef'}});
     const archiveRequest=await nextRequest(reused,first);
     assert.equal(archiveRequest.action,'archive');assert.equal(archiveRequest.emailId,'123456789abcdef');
-    assert.equal((await respond({id:archiveRequest.id,error:'forged'},'0'.repeat(64))).status,403,'unsigned responses are refused');
+    assert.equal((await respond({id:archiveRequest.id,error:'forged'},randomBytes(32))).status,403,'a response sealed with another key is refused');
     await respond({id:archiveRequest.id,error:'Archive result could not be verified; inspect Gmail before retrying'});
     assert.equal((await archive).isError,true);
     const call=client.callTool({name:'account_identity',arguments:{}});

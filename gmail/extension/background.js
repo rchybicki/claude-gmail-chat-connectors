@@ -218,13 +218,15 @@ async function poll() {
   try {
     const {token,port} = await config;
     const BRIDGE = 'http://127.0.0.1:'+port;
-    // The key never leaves the extension: messages carry HMAC signatures (see gmail/server.mjs).
+    // The key never leaves the extension: polls and requests carry HMAC signatures, results are sealed (see gmail/server.mjs).
     const hex = bytes => [...new Uint8Array(bytes)].map(b=>b.toString(16).padStart(2,'0')).join('');
     const unhex = text => new Uint8Array(text.match(/../g).map(h=>parseInt(h,16)));
     const key = await crypto.subtle.importKey('raw',unhex(token),{name:'HMAC',hash:'SHA-256'},false,['sign','verify']);
     const sign = async text => hex(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(text)));
     const verify = async (signature,text) => /^[a-f0-9]{64}$/.test(signature||'') &&
       crypto.subtle.verify('HMAC',key,unhex(signature),new TextEncoder().encode(text));
+    const resultKey = await crypto.subtle.deriveKey({name:'HKDF',hash:'SHA-256',salt:new Uint8Array(),info:new TextEncoder().encode('response')},
+      await crypto.subtle.importKey('raw',unhex(token),'HKDF',false,['deriveKey']),{name:'AES-GCM',length:256},false,['encrypt']);
     // Polls are signed for one server run. After an error, the next alarm starts a new loop for the current run.
     const {session} = await (await fetch(BRIDGE+'/session',{signal:AbortSignal.timeout(5000)})).json();
     while (true) {
@@ -238,8 +240,9 @@ async function poll() {
         let result;
         try { result = {data:await run(request)}; }
         catch(error) { result = {error:error.message}; }
-        const body = JSON.stringify({id:request.id,...result});
-        await fetch(BRIDGE+'/response',{method:'POST',headers:{'Content-Type':'application/json','X-Signature':await sign('response\n'+body)},body,signal:AbortSignal.timeout(5000)});
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const sealed = await crypto.subtle.encrypt({name:'AES-GCM',iv},resultKey,new TextEncoder().encode(JSON.stringify({id:request.id,...result})));
+        await fetch(BRIDGE+'/response',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:new Blob([iv,sealed]),signal:AbortSignal.timeout(5000)});
       }
       await sleep(500);
     }
