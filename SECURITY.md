@@ -20,7 +20,7 @@ the code against it.
   `chat.spaces.create` also create named spaces; the connector only starts direct messages and
   group chats. Claude can start a chat with any email address, also outside your company, unless
   your company's Google settings block external chats.
-- No known security defects. `npm audit` reports no known vulnerabilities.
+- No known security defects. `npm audit` reported no known vulnerabilities on 28 October 2026.
 - Some risks come with any tool of this kind. They are listed below, each with what you can do
   about it.
 
@@ -44,7 +44,7 @@ the code against it.
    connectors to every Claude Code session on your computer, also to sessions where Claude reads
    untrusted code or web pages. Protections:
    - Gmail has no send tool, and Calendar no create tool, unless you turn them on.
-   - Claude asks you before it uses a tool. Read what it wants to do before you click "Allow".
+   - When Claude asks before it uses a tool, read what it wants to do before you click "Allow".
    - Do not choose "Always allow" for `send_message`, `start_chat`, `send_email`, `create_event`,
      `create_email_draft`, `archive_email` or `read_email_and_mark_read`.
    - If you want the smallest risk, install only Gmail, without the two options.

@@ -158,7 +158,7 @@ the local keys and cancels the Google Chat sign-in. Then remove **Gmail for Clau
 **Gmail.** Claude starts a small local program (`gmail/server.mjs`). When Claude uses a tool, the
 Chrome extension opens Gmail in a minimized Chrome window of its own, does the action on the page, checks that the page
 shows your account, closes the window, and sends back the result. The program and the extension talk only on
-your computer (`127.0.0.1`). Each message is signed or sealed with a random key that setup creates
+your computer (`127.0.0.1`). Each poll, request and result is signed or sealed with a random key that setup creates
 (`gmail/extension/bridge-local.json`). The key itself is never sent. Without the key, a website or
 another program cannot read the requests and results or send its own, also when it uses port 3456.
 The extension does not copy your Google password or cookies.
