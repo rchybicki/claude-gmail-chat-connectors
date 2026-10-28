@@ -20,9 +20,7 @@ the code against it.
   `chat.spaces.create` also create named spaces; the connector only starts direct messages and
   group chats. Claude can start a chat with any email address, also outside your company, unless
   your company's Google settings block external chats.
-- No known security defects. `npm audit` reports one high vulnerability, in `zod` 3.25.76
-  (GHSA-mrhx-c7xc-m3w5), which checks the messages from the Claude app. Only zod 4, a new major
-  version, fixes it. The connectors do not use zod 4 yet.
+- No known security defects. `npm audit` reports no known vulnerabilities.
 - Some risks come with any tool of this kind. They are listed below, each with what you can do
   about it.
 
