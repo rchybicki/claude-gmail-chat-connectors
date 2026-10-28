@@ -227,7 +227,7 @@ async function poll() {
       crypto.subtle.verify('HMAC',key,unhex(signature),new TextEncoder().encode(text));
     const resultKey = await crypto.subtle.deriveKey({name:'HKDF',hash:'SHA-256',salt:new Uint8Array(),info:new TextEncoder().encode('response')},
       await crypto.subtle.importKey('raw',unhex(token),'HKDF',false,['deriveKey']),{name:'AES-GCM',length:256},false,['encrypt']);
-    // Polls are signed for one server run. After an error, the next alarm starts a new loop for the current run.
+    // Polls are signed for the server's current session. After an error, the next alarm reads the session again and starts a new loop.
     const {session} = await (await fetch(BRIDGE+'/session',{signal:AbortSignal.timeout(5000)})).json();
     while (true) {
       const nonce = crypto.randomUUID();
