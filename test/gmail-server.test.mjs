@@ -183,6 +183,28 @@ test('a poll that a program on the port caught gets nothing from a later server 
     assert.equal((await draft).isError,true);
   } finally {await client.close();}
 });
+test('a poll kept from this run is refused, also after 10,000 later polls',async()=>{
+  writeFileSync(join(dir,'gmail','extension','bridge-local.json'),JSON.stringify({account:expectedAccount,token,port}));
+  const client=new Client({name:'nonce-limit',version:'1.0.0'});
+  try {
+    await client.connect(new StdioClientTransport({command:process.execPath,args:[join(dir,'gmail','server.mjs')],stderr:'pipe'}));
+    const {session}=await (await fetch(base+'/session')).json();
+    const headers=nonce=>({'X-Nonce':nonce,'X-Signature':sign('poll\n'+session+'\n'+nonce)});
+    const kept=headers(randomUUID());
+    let previous=fetch(base+'/poll',{headers:kept});
+    for(let i=0;i<10001;i++){
+      const next=fetch(base+'/poll',{headers:headers(randomUUID())});
+      if(await Promise.race([previous.then(()=>false),next.then(r=>r.status===403)]))break;
+      previous=next;
+    }
+    assert.equal((await fetch(base+'/poll',{headers:kept})).status,403,'the kept poll is refused');
+    const nonce=randomUUID(),waiting=poll(nonce);await new Promise(r=>setTimeout(r,200));
+    const call=client.callTool({name:'account_identity',arguments:{}});
+    const request=await nextRequest(nonce,waiting);
+    await respond({id:request.id,data:{account:expectedAccount}});
+    assert.equal((await call).isError,undefined,'the extension continues with the new session');
+  } finally {await client.close();}
+});
 test('the extension and the server work together through the bridge',async()=>{
   writeFileSync(join(dir,'gmail','extension','bridge-local.json'),JSON.stringify({account:expectedAccount,token,port}));
   const client=new Client({name:'extension-and-server',version:'1.0.0'});

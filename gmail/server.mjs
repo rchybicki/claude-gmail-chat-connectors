@@ -13,11 +13,12 @@ let pending = null;
 let poller = null;
 // Every message is signed with the shared key, which never crosses the wire. A program
 // that takes the port while this server is down cannot learn the key, and the extension
-// runs only requests signed for the nonce of its own poll. Polls are signed for the random
-// session of one server run, so a poll that such a program keeps is refused by every later run.
+// runs only requests signed for the nonce of its own poll. Polls are signed for a random
+// session, new for each server run and after 10,000 polls, so a poll that such a program keeps
+// is refused later.
 // The extension seals each result (AES-256-GCM), because this server can end before the
 // result is ready and a program can take the port in that time.
-const session = randomUUID();
+let session = randomUUID();
 const responseKey = Buffer.from(hkdfSync('sha256',Buffer.from(token,'hex'),Buffer.alloc(0),'response',32));
 const sign = text => createHmac('sha256',Buffer.from(token,'hex')).update(text).digest('hex');
 const valid = (signature,text) => {const a=Buffer.from(String(signature||'')),b=Buffer.from(sign(text));return a.length===b.length&&timingSafeEqual(a,b);};
@@ -36,8 +37,8 @@ const bridge = createServer(async (req,res) => {
   if (req.method==='GET' && req.url==='/poll') {
     const nonce=String(req.headers['x-nonce']||'');
     if (!/^[0-9a-f-]{36}$/.test(nonce) || usedNonces.has(nonce) || !valid(signature,'poll\n'+session+'\n'+nonce)) return json(res,403,{error:'Forbidden'});
-    if (usedNonces.size>10000) usedNonces.clear();
     usedNonces.add(nonce);
+    if (usedNonces.size>10000) {session=randomUUID();usedNonces.clear();}
     if (poller) json(poller.res,409,{error:'Another poll is active'});
     const current={res,nonce};
     poller=current;
