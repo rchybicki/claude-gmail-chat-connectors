@@ -20,7 +20,9 @@ the code against it.
   `chat.spaces.create` also create named spaces; the connector only starts direct messages and
   group chats. Claude can start a chat with any email address, also outside your company, unless
   your company's Google settings block external chats.
-- No known security defects. `npm audit` reports no known vulnerabilities.
+- No known security defects. `npm audit` reports one high vulnerability, in `zod` 3.25.76
+  (GHSA-mrhx-c7xc-m3w5), which checks the messages from the Claude app. Only zod 4, a new major
+  version, fixes it. The connectors do not use zod 4 yet.
 - Some risks come with any tool of this kind. They are listed below, each with what you can do
   about it.
 
@@ -46,8 +48,7 @@ the code against it.
    - Gmail has no send tool, and Calendar no create tool, unless you turn them on.
    - Claude asks you before it uses a tool. Read what it wants to do before you click "Allow".
    - Do not choose "Always allow" for `send_message`, `start_chat`, `send_email`, `create_event`,
-     `create_email_draft`, `archive_email` or `read_email_and_mark_read`, and do not let Claude Code approve tools or commands
-     automatically ("bypass permissions" or auto-approve) while the connectors are on.
+     `create_email_draft`, `archive_email` or `read_email_and_mark_read`.
    - If you want the smallest risk, install only Gmail, without the two options.
 4. **Claude acts as you.** A Google Chat message or new chat, and with the options an email or a calendar
    invitation, that Claude sends shows your name.
@@ -93,7 +94,7 @@ A scanner flags this file as a secret. It is not one in this case:
 
 | Where | Protection |
 |---|---|
-| Gmail connection (`gmail/server.mjs`, `gmail/extension/background.js`) | Listens only on `127.0.0.1`. Each message is signed (HMAC-SHA256) with a random key that setup creates. The key itself is never sent. The extension runs only requests signed for its own poll. Web pages are refused by `Origin` and `Host` checks. |
+| Gmail connection (`gmail/server.mjs`, `gmail/extension/background.js`) | Listens only on `127.0.0.1`. Polls and requests are signed (HMAC-SHA256) and results are sealed (AES-256-GCM) with a random key that setup creates. The key itself is never sent. The extension runs only requests signed for its own poll, and the local program accepts only polls signed for its current run. Web pages are refused by `Origin` and `Host` checks. |
 | Gmail account (`gmail/extension/page.js`) | Each action first checks that Gmail shows exactly your configured account: in an open Gmail tab, or else in a tab that the extension opens. There is no fallback to another account. |
 | Google Calendar (`gmail/extension/calendar.js`) | Calendar API calls (`calendar/v3` at `clients6.google.com`) from a Calendar tab, with that tab's session, as the Calendar web app makes them. Each call first checks that the primary calendar is your configured account. Reads only, except `create_event` when turned on; each create request has a fixed event ID, so a request that is delivered twice cannot create a second copy, and every error names that ID so that Claude can check before it tries again. |
 | Gmail actions | No delete, label or attachment tools. Unread mail is opened only by the separate `read_email_and_mark_read` tool. Archive acts on one exact thread and checks the result. `send_email` exists only when turned on: it checks the account, recipient, subject and text before it clicks Send once, refuses when any draft or sent email to that recipient already uses the subject, and confirms the email in Sent. Formatting (bold, italic, http/https/mailto links, lists) is built with DOM methods from a small Markdown subset; no HTML from Claude is inserted, so the text cannot add images, styles or scripts. |
