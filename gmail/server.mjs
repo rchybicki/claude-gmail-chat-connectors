@@ -13,7 +13,9 @@ let pending = null;
 let poller = null;
 // Every message is signed with the shared key, which never crosses the wire. A program
 // that takes the port while this server is down cannot learn the key, and the extension
-// runs only requests signed for the nonce of its own poll.
+// runs only requests signed for the nonce of its own poll. Polls are signed for the random
+// session of one server run, so a poll that such a program keeps is refused by every later run.
+const session = randomUUID();
 const sign = text => createHmac('sha256',Buffer.from(token,'hex')).update(text).digest('hex');
 const valid = (signature,text) => {const a=Buffer.from(String(signature||'')),b=Buffer.from(sign(text));return a.length===b.length&&timingSafeEqual(a,b);};
 const usedNonces = new Set();
@@ -27,9 +29,10 @@ function deliver() {
 const bridge = createServer(async (req,res) => {
   const origin=req.headers.origin, signature=req.headers['x-signature'];
   if (req.headers.host !== '127.0.0.1:'+port || (origin && !/^chrome-extension:\/\/[a-p]{32}$/.test(origin))) return json(res,403,{error:'Forbidden'});
+  if (req.method==='GET' && req.url==='/session') return json(res,200,{session});
   if (req.method==='GET' && req.url==='/poll') {
     const nonce=String(req.headers['x-nonce']||'');
-    if (!/^[0-9a-f-]{36}$/.test(nonce) || usedNonces.has(nonce) || !valid(signature,'poll\n'+nonce)) return json(res,403,{error:'Forbidden'});
+    if (!/^[0-9a-f-]{36}$/.test(nonce) || usedNonces.has(nonce) || !valid(signature,'poll\n'+session+'\n'+nonce)) return json(res,403,{error:'Forbidden'});
     if (usedNonces.size>10000) usedNonces.clear();
     usedNonces.add(nonce);
     if (poller) json(poller.res,409,{error:'Another poll is active'});

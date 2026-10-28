@@ -20,7 +20,10 @@ writeFileSync(join(dir,'gmail','extension','bridge-local.json'),JSON.stringify({
 test.after(()=>rmSync(dir,{recursive:true,force:true}));
 // Plays the extension's side of the signed bridge protocol.
 const sign=text=>createHmac('sha256',Buffer.from(token,'hex')).update(text).digest('hex');
-const poll=async(nonce=randomUUID(),signature=sign('poll\n'+nonce),extra={})=>fetch(base+'/poll',{headers:{'X-Nonce':nonce,'X-Signature':signature,...extra}});
+const poll=async(nonce=randomUUID(),signature,extra={})=>{
+  signature??=sign('poll\n'+(await (await fetch(base+'/session')).json()).session+'\n'+nonce);
+  return fetch(base+'/poll',{headers:{'X-Nonce':nonce,'X-Signature':signature,...extra}});
+};
 async function nextRequest(nonce=randomUUID(),waiting=poll(nonce)){
   const {payload,signature}=await (await waiting).json();
   assert.equal(signature,sign('request\n'+nonce+'\n'+payload),'server signs each request for this poll');

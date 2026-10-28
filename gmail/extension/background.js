@@ -225,9 +225,11 @@ async function poll() {
     const sign = async text => hex(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(text)));
     const verify = async (signature,text) => /^[a-f0-9]{64}$/.test(signature||'') &&
       crypto.subtle.verify('HMAC',key,unhex(signature),new TextEncoder().encode(text));
+    // Polls are signed for one server run. After an error, the next alarm starts a new loop for the current run.
+    const {session} = await (await fetch(BRIDGE+'/session',{signal:AbortSignal.timeout(5000)})).json();
     while (true) {
       const nonce = crypto.randomUUID();
-      const response = await fetch(BRIDGE+'/poll',{headers:{'X-Nonce':nonce,'X-Signature':await sign('poll\n'+nonce)},signal:AbortSignal.timeout(25000)});
+      const response = await fetch(BRIDGE+'/poll',{headers:{'X-Nonce':nonce,'X-Signature':await sign('poll\n'+session+'\n'+nonce)},signal:AbortSignal.timeout(25000)});
       if (!response.ok) throw new Error('Bridge unavailable');
       const {payload,signature} = await response.json();
       if (payload) {

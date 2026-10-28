@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 import { createHmac, randomBytes } from 'node:crypto';
 const source=readFileSync(new URL('../gmail/extension/background.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
-const account='jan.kowalski@randstad.com',token=randomBytes(32).toString('hex'),port=3456;
+const account='jan.kowalski@randstad.com',token=randomBytes(32).toString('hex'),port=3456,session='5b0e6f2c-8a1d-4c3e-9f7a-2d4b6c8e0a1f';
 const sign=text=>createHmac('sha256',Buffer.from(token,'hex')).update(text).digest('hex');
 // Runs the extension against a server that answers the first poll with `answer(nonce)`.
 async function bridge(answer,calendarPage,settings={},gmailTabs=[{id:1}]) {
@@ -13,6 +13,7 @@ async function bridge(answer,calendarPage,settings={},gmailTabs=[{id:1}]) {
   const fetch=async(url,options={})=>{
     if(url==='fixture-config')return {json:async()=>({account,token,port,...settings})};
     sent.push({url,headers:options.headers,body:options.body});
+    if(url.endsWith('/session'))return {ok:true,json:async()=>({session})};
     if(url.endsWith('/poll')){
       if(++polls>1){setTimeout(done,10);throw new Error('stop');}
       setTimeout(done,1000); // A refused request ends the loop without another poll.
@@ -43,7 +44,7 @@ test('a correctly signed request runs and its response is signed',async()=>{
   const {sent,pageCalls}=await bridge(nonce=>{const payload=JSON.stringify(request);return {payload,signature:sign('request\n'+nonce+'\n'+payload)};});
   assert.deepEqual(pageCalls,['identity']);
   const poll=sent.find(s=>s.url.endsWith('/poll'));
-  assert.equal(poll.headers['X-Signature'],sign('poll\n'+poll.headers['X-Nonce']));
+  assert.equal(poll.headers['X-Signature'],sign('poll\n'+session+'\n'+poll.headers['X-Nonce']),'the poll is signed for the session of this server run');
   const response=sent.find(s=>s.url.endsWith('/response'));
   assert.equal(response.headers['X-Signature'],sign('response\n'+response.body));
   assert.equal(JSON.parse(response.body).data.account,account);
