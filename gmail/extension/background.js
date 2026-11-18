@@ -31,22 +31,46 @@ async function openTab(url) {
   workWindow = created.id;
   return created.tabs[0];
 }
-// The notice opens in the user's window, never in the minimized work window, and comes to the front.
-async function showNotice() {
-  const url = chrome.runtime.getURL('notice.html');
-  const last = await chrome.windows.getLastFocused({windowTypes:['normal']}).catch(()=>undefined);
-  if (!last || last.id === workWindow) return tabsRetry(()=>chrome.windows.create({url,focused:true}));
-  await tabsRetry(()=>chrome.tabs.create({windowId:last.id,url,active:true}));
-  await chrome.windows.update(last.id,{focused:true});
+// The toolbar title lists the signed-out services, and the badge shows while it lists any. Chrome keeps both while
+// the service worker sleeps, so the state outlives a worker restart and needs no storage permission.
+const TITLE = chrome.runtime.getManifest().action.default_title, SIGNED_OUT = '. Sign in needed: ';
+const signedOutServices = chrome.action.getTitle({}).then(title=>new Set(title.split(SIGNED_OUT)[1]?.split(', ')), ()=>new Set());
+chrome.action.setBadgeBackgroundColor({color:'#d93025'}).catch(()=>{});
+// The notice is due from the moment a service signs out until a notice tab is open.
+let noticeDue = false, noticeOpening;
+// Records a sign-in check of 'Gmail' or 'Calendar'. Only a success of that same service clears it.
+async function signInChecked(service, signedIn) {
+  const out = await signedOutServices;
+  if (!signedIn && !out.has(service)) noticeDue = true;
+  if (signedIn) out.delete(service); else out.add(service);
+  if (!out.size) noticeDue = false;
+  await Promise.all([chrome.action.setTitle({title:out.size ? TITLE+SIGNED_OUT+[...out].join(', ') : TITLE}),
+    chrome.action.setBadgeText({text:out.size ? '!' : ''})]).catch(()=>{});
+  // The notice opens off the response path, so Claude gets the error at once and unchanged.
+  if (!signedIn && noticeDue) showNotice(false).catch(()=>{});
 }
-// The badge holds the signed-out state. It outlasts a restart of the service worker, so one episode opens one notice.
-async function signedOut() {
-  try {
-    if (await chrome.action.getBadgeText({})) return;
-    await chrome.action.setBadgeBackgroundColor({color:'#d93025'});
-    await chrome.action.setBadgeText({text:'!'});
-    await showNotice();
-  } catch { /* Claude gets the original error either way. */ }
+// The one path that opens the notice, for a failure and for a click on the icon. An open notice tab gets the
+// focus on a click and is left alone otherwise. The notice never opens in the work window or a minimized one;
+// after a worker restart the work window is known only by its minimized state.
+function showNotice(focus) {
+  return noticeOpening ??= (async()=>{
+    const url = chrome.runtime.getURL('notice.html');
+    const [open] = await chrome.runtime.getContexts({contextTypes:['TAB'],documentUrls:[url]});
+    if (open) {
+      if (focus) {
+        await tabsRetry(()=>chrome.tabs.update(open.tabId,{active:true}));
+        await chrome.windows.update(open.windowId,{focused:true});
+      }
+    } else {
+      const last = await chrome.windows.getLastFocused({windowTypes:['normal']}).catch(()=>undefined);
+      // The window can close between the lookup and the new tab.
+      const tab = last && last.id !== workWindow && last.state !== 'minimized' &&
+        await tabsRetry(()=>chrome.tabs.create({windowId:last.id,url,active:true})).catch(()=>undefined);
+      if (tab) await chrome.windows.update(last.id,{focused:true}).catch(()=>{});
+      else await tabsRetry(()=>chrome.windows.create({url,focused:true}));
+    }
+    noticeDue = false;
+  })().finally(()=>{ noticeOpening = undefined; });
 }
 // Opens Calendar for the configured account in a background tab; the page checks the account.
 async function calendar(request, account) {
@@ -57,17 +81,17 @@ async function calendar(request, account) {
     for (let i=0;i<30;i++) {
       const result = await page(tab.id, calendarPageOperation, {...request,expectedAccount:account}).catch(error=>({ready:false,cause:error.message}));
       if (result.error) {
-        if (result.signedOut) await signedOut();
+        if (result.signedOut) await signInChecked('Calendar', false);
         throw new Error(result.error);
       }
       if (result.ready !== false) {
-        await chrome.action.setBadgeText({text:''}).catch(()=>{});
+        await signInChecked('Calendar', true);
         return result;
       }
       lastError = result.cause;
       await sleep(500);
     }
-    await signedOut();
+    await signInChecked('Calendar', false);
     throw new Error('Open Google Calendar with the configured account in this Chrome profile' + (lastError ? ' (last error: ' + lastError + ')' : ''));
   } finally {
     await tabsRetry(()=>chrome.tabs.remove(tab.id)).catch(()=>{});
@@ -97,10 +121,10 @@ async function run(request) {
     } finally { await tabsRetry(()=>chrome.tabs.remove(tab.id)).catch(()=>{}); }
   }
   if (!identity) {
-    await signedOut();
+    await signInChecked('Gmail', false);
     throw new Error('Sign in to Gmail with the configured account in this Chrome profile');
   }
-  await chrome.action.setBadgeText({text:''}).catch(()=>{});
+  await signInChecked('Gmail', true);
   if (request.action === 'identity') return {...identity,extensionVersion:chrome.runtime.getManifest().version};
   const base = new URL(identity.baseUrl);
   if (base.origin !== 'https://mail.google.com' || !/^\/mail\/u\/\d+\/$/.test(base.pathname)) throw new Error('Unsupported Gmail account URL');
@@ -279,7 +303,7 @@ async function poll() {
 }
 chrome.alarms.create('gmail-mcp-poll',{periodInMinutes:0.5});
 chrome.alarms.onAlarm.addListener(poll);
-chrome.action.onClicked.addListener(async()=>{ if (await chrome.action.getBadgeText({})) await showNotice(); });
+chrome.action.onClicked.addListener(async()=>{ if ((await signedOutServices).size) await showNotice(true).catch(()=>{}); });
 chrome.runtime.onStartup.addListener(poll);
 chrome.runtime.onInstalled.addListener(poll);
 poll();

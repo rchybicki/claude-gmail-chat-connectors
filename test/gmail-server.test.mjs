@@ -37,8 +37,8 @@ const respond=(body,key=responseKey)=>{
 // Runs the real extension against whatever listens on the port, until a request to the port fails.
 const extensionSource=readFileSync(new URL('../gmail/extension/background.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
 function runExtension() {
-  const chrome={runtime:{getURL:()=>'config',getManifest:()=>({version:'test'}),onStartup:{addListener(){}},onInstalled:{addListener(){}}},alarms:{create(){},onAlarm:{addListener(){}}},
-    action:{setBadgeText:async()=>{},onClicked:{addListener(){}}},tabs:{query:async()=>[{id:1}],remove:async()=>{}},scripting:{executeScript:async()=>[{result:{account:expectedAccount,baseUrl:'https://mail.google.com/mail/u/0/'}}]}};
+  const chrome={runtime:{getURL:()=>'config',getManifest:()=>({version:'test',action:{default_title:'Gmail for Claude'}}),onStartup:{addListener(){}},onInstalled:{addListener(){}}},alarms:{create(){},onAlarm:{addListener(){}}},
+    action:{getTitle:async()=>'Gmail for Claude',setTitle:async()=>{},setBadgeText:async()=>{},setBadgeBackgroundColor:async()=>{},onClicked:{addListener(){}}},tabs:{query:async()=>[{id:1}],remove:async()=>{}},scripting:{executeScript:async()=>[{result:{account:expectedAccount,baseUrl:'https://mail.google.com/mail/u/0/'}}]}};
   vm.runInNewContext(extensionSource,{chrome,crypto,TextEncoder,AbortSignal,URL,Blob,setTimeout,gmailPageOperation(){},extractReadThread(){},prepareDraft(){},calendarPageOperation(){},
     fetch:async(url,options)=>url==='config'?{json:async()=>({account:expectedAccount,token,port})}:fetch(url,options)});
 }
