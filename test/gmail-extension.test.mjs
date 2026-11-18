@@ -8,36 +8,41 @@ const account='jan.kowalski@randstad.com',token=randomBytes(32).toString('hex'),
 const sign=text=>createHmac('sha256',Buffer.from(token,'hex')).update(text).digest('hex');
 // The port gets each result sealed with AES-256-GCM (IV, ciphertext, tag); only the key opens it.
 const responseKey=Buffer.from(hkdfSync('sha256',Buffer.from(token,'hex'),Buffer.alloc(0),'response',32));
-const sealedResponse=async sent=>Buffer.from(await sent.find(s=>s.url.endsWith('/response')).body.arrayBuffer());
-const opened=async sent=>{
-  const sealed=await sealedResponse(sent),open=createDecipheriv('aes-256-gcm',responseKey,sealed.subarray(0,12),{authTagLength:16});
+const sealedResponse=async(sent,i=0)=>Buffer.from(await sent.filter(s=>s.url.endsWith('/response'))[i].body.arrayBuffer());
+const opened=async(sent,i=0)=>{
+  const sealed=await sealedResponse(sent,i),open=createDecipheriv('aes-256-gcm',responseKey,sealed.subarray(0,12),{authTagLength:16});
   open.setAuthTag(sealed.subarray(-16));
   return JSON.parse(Buffer.concat([open.update(sealed.subarray(12,-16)),open.final()]));
 };
-// Runs the extension against a server that answers the first poll with `answer(nonce)`.
-async function bridge(answer,calendarPage,settings={},gmailTabs=[{id:1}]) {
-  const sent=[],pageCalls=[],tabs=[];let polls=0,done;
+// Runs the extension against a server that answers poll n with `answers[n](nonce,badge)`; a single answer serves one poll.
+// Waits run at once. `signedIn()` decides whether the Gmail identity check finds the account.
+async function bridge(answers,calendarPage,settings={},gmailTabs=[{id:1}],signedIn=()=>true) {
+  answers=[answers].flat();
+  const sent=[],pageCalls=[],tabs=[];let polls=0,done,timer,badge='',clicked;
   const finished=new Promise(r=>done=r);
   const fetch=async(url,options={})=>{
     if(url==='fixture-config')return {json:async()=>({account,token,port,...settings})};
     sent.push({url,headers:options.headers,body:options.body});
     if(url.endsWith('/session'))return {ok:true,json:async()=>({session})};
     if(url.endsWith('/poll')){
-      if(++polls>1){setTimeout(done,10);throw new Error('stop');}
-      setTimeout(done,1000); // A refused request ends the loop without another poll.
-      return {ok:true,json:async()=>answer(options.headers['X-Nonce'])};
+      clearTimeout(timer);
+      if(++polls>answers.length){timer=setTimeout(done,10);throw new Error('stop');}
+      timer=setTimeout(done,1000); // A refused request ends the loop without another poll.
+      return {ok:true,json:async()=>answers[polls-1](options.headers['X-Nonce'],badge)};
     }
     return {ok:true,json:async()=>({ok:true})};
   };
-  const chrome={runtime:{getURL:()=>'fixture-config',getManifest:()=>({version:'1.0.0'}),onStartup:{addListener(){}},onInstalled:{addListener(){}}},
+  const chrome={runtime:{getURL:path=>path==='bridge-local.json'?'fixture-config':'chrome-extension://ext/'+path,getManifest:()=>({version:'1.0.0'}),onStartup:{addListener(){}},onInstalled:{addListener(){}}},
     alarms:{create(){},onAlarm:{addListener(){}}},
+    action:{getBadgeText:async()=>badge,setBadgeText:async({text})=>{badge=text;},setBadgeBackgroundColor:async()=>{},onClicked:{addListener(f){clicked=f;}}},
     tabs:{query:async()=>gmailTabs,create:async({url,windowId})=>{tabs.push('open '+url+' in '+windowId);return {id:8};},remove:async id=>{tabs.push('close '+id);}},
-    windows:{create:async({url,state,focused})=>{tabs.push('window '+state+' '+focused+' '+url);return {id:9,state,tabs:[{id:7}]};}},
-    scripting:{executeScript:async({args:[args]})=>{pageCalls.push(args.action);return [{result:args.action==='identity'?{account,baseUrl:'https://mail.google.com/mail/u/0/'}:calendarPage(args,pageCalls.length)}];}}};
-  const context={fetch,chrome,crypto:globalThis.crypto,TextEncoder,AbortSignal,URL,Blob,setTimeout,gmailPageOperation(){},extractReadThread(){},prepareDraft(){},calendarPageOperation(){}};
+    windows:{create:async({url,state,focused})=>{tabs.push('window '+state+' '+focused+' '+url);return {id:9,state,tabs:[{id:7}]};},
+      getLastFocused:async()=>({id:3}),update:async(id,{focused})=>{tabs.push('focus '+id+' '+focused);}},
+    scripting:{executeScript:async({args:[args]})=>{pageCalls.push(args.action);return [{result:args.action==='identity'?signedIn()&&{account,baseUrl:'https://mail.google.com/mail/u/0/'}:calendarPage(args,pageCalls.length)}];}}};
+  const context={fetch,chrome,crypto:globalThis.crypto,TextEncoder,AbortSignal,URL,Blob,setTimeout:f=>setTimeout(f),gmailPageOperation(){},extractReadThread(){},prepareDraft(){},calendarPageOperation(){}};
   vm.createContext(context);vm.runInContext(source,context);
   await finished;
-  return {sent,pageCalls,tabs};
+  return {sent,pageCalls,tabs,badge:()=>badge,click:()=>clicked()};
 }
 const request={id:'r1',action:'identity'};
 test('a server without the key gets no key and cannot run mailbox actions',async()=>{
@@ -94,4 +99,39 @@ test('send refuses when the subject search finds anything, also another subject,
   assert.deepEqual(pageCalls,['identity','search']);
   assert.match((await opened(sent)).error,/already uses this subject.*Nothing was sent/);
   assert.equal(tabs.at(-1),'close 7');
+});
+const notice='open chrome-extension://ext/notice.html in 3';
+// Each answer records the icon badge as the request arrives.
+const watched=(badges,requests)=>requests.map(request=>(nonce,badge)=>{badges.push(badge);return signed(request)(nonce);});
+test('a Gmail sign-in failure marks the icon and opens one notice for many failures; the next success clears the mark',async()=>{
+  const badges=[];
+  const answers=watched(badges,['g1','g2','g3','g4'].map(id=>({id,action:'identity'})));
+  const {sent,tabs,badge}=await bridge(answers,null,{},[],()=>badges.length===4);
+  for(const i of [0,1,2]) assert.deepEqual(await opened(sent,i),{id:'g'+(i+1),error:'Sign in to Gmail with the configured account in this Chrome profile'},'Claude gets the same error as before');
+  assert.deepEqual(badges,['','!','!','!'],'the first failure marks the icon');
+  assert.equal(tabs.filter(t=>t===notice).length,1,'repeated failures open one notice');
+  assert.equal(tabs[tabs.indexOf(notice)+1],'focus 3 true','the notice opens in the user window, which comes to the front');
+  assert.equal((await opened(sent,3)).data.account,account);
+  assert.equal(badge(),'','success clears the mark');
+});
+test('a Calendar sign-in failure, by timeout or by another account, does the same',async()=>{
+  const badges=[];
+  const pages={c1:{ready:false},c2:{error:'Calendar account identity missing or mismatched',signedOut:true},c3:{account,calendars:[]}};
+  const {sent,tabs,badge,click}=await bridge(watched(badges,['c1','c2','c3'].map(id=>({id,action:'calendar_list'}))),args=>pages[args.id]);
+  assert.deepEqual(await opened(sent,0),{id:'c1',error:'Open Google Calendar with the configured account in this Chrome profile'});
+  assert.deepEqual(await opened(sent,1),{id:'c2',error:'Calendar account identity missing or mismatched'});
+  assert.deepEqual(badges,['','!','!']);
+  assert.equal(tabs.filter(t=>t===notice).length,1);
+  assert.deepEqual(await opened(sent,2),{id:'c3',data:{account,calendars:[]}});
+  assert.equal(badge(),'');
+  await click();
+  assert.equal(tabs.filter(t=>t===notice).length,1,'the icon opens no notice while Claude reaches the account');
+});
+test('other errors leave the icon alone, and the icon reopens the notice while signed out',async()=>{
+  const failed=await bridge(signed({id:'e1',action:'calendar_event',eventId:'abc'}),()=>({error:'Calendar API: HTTP 404'}));
+  assert.equal(failed.badge(),'');
+  assert.ok(!failed.tabs.includes(notice));
+  const {tabs,click}=await bridge(signed({id:'g1',action:'identity'}),null,{},[],()=>false);
+  await click();
+  assert.equal(tabs.filter(t=>t===notice).length,2);
 });

@@ -130,7 +130,7 @@ Do not move or delete the folder after setup: Claude runs the connectors from it
 | What you see | What to do |
 |---|---|
 | "Chrome extension unavailable or operation timed out" | Open Chrome. Wait 30 seconds and try again. After `send_email` or `create_event`, first check Sent or the calendar: the action may have worked. |
-| "Sign in to Gmail with the configured account" | Sign in to Gmail with your work account in this Chrome profile. |
+| "Sign in to Gmail with the configured account", or a red **!** on the extension icon | Claude cannot reach Gmail or Calendar for your work account. The extension opens a tab with a **Sign in** button; click it and sign in with your work account in this Chrome profile. The **!** goes away when Claude next reaches Gmail. Click the icon to open the tab again. |
 | "Gmail account identity missing or mismatched" | Gmail shows another account, or Gmail is not in English. |
 | "Port 3456 is in use" | Another Claude app or session uses Gmail. Close it there and try again. |
 | Gmail worked before and now fails | Google changed Gmail's page. Run `git pull` in the folder to get an update. |

@@ -37,7 +37,7 @@ const background=readFileSync(new URL('../gmail/extension/background.js',import.
   .replace(/^import .*;\n/gm,'').split('async function poll()')[0];
 function bridgeFixture({matches=1,failClick=false,failFreshTab=false,persisted=true,selectionDelay=0,acknowledged=true}={}) {
   let clicks=0,created=0,closed=0,searches=0,readiness=0,freshChecks=0;
-  const context={URL,fetch:async()=>({json:async()=>({account})}),setTimeout:fn=>fn(),gmailPageOperation(){},extractReadThread(){},prepareDraft(){},chrome:{runtime:{getURL:()=> 'fixture-only'},
+  const context={URL,fetch:async()=>({json:async()=>({account})}),setTimeout:fn=>fn(),gmailPageOperation(){},extractReadThread(){},prepareDraft(){},chrome:{runtime:{getURL:()=> 'fixture-only'},action:{setBadgeText:async()=>{}},
     tabs:{query:async()=>[{id:1}],create:async()=>{created++;if(failFreshTab&&created===2)throw Error('navigation failed');return {id:created+1};},remove:async()=>{closed++;}},
     windows:{create:async()=>{created++;if(failFreshTab&&created>2)throw Error('navigation failed');return {id:9,state:'minimized',tabs:[{id:created+1}]};}},
     scripting:{executeScript:async({target,args:[args]})=>{

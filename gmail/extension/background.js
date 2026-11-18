@@ -31,6 +31,23 @@ async function openTab(url) {
   workWindow = created.id;
   return created.tabs[0];
 }
+// The notice opens in the user's window, never in the minimized work window, and comes to the front.
+async function showNotice() {
+  const url = chrome.runtime.getURL('notice.html');
+  const last = await chrome.windows.getLastFocused({windowTypes:['normal']}).catch(()=>undefined);
+  if (!last || last.id === workWindow) return tabsRetry(()=>chrome.windows.create({url,focused:true}));
+  await tabsRetry(()=>chrome.tabs.create({windowId:last.id,url,active:true}));
+  await chrome.windows.update(last.id,{focused:true});
+}
+// The badge holds the signed-out state. It outlasts a restart of the service worker, so one episode opens one notice.
+async function signedOut() {
+  try {
+    if (await chrome.action.getBadgeText({})) return;
+    await chrome.action.setBadgeBackgroundColor({color:'#d93025'});
+    await chrome.action.setBadgeText({text:'!'});
+    await showNotice();
+  } catch { /* Claude gets the original error either way. */ }
+}
 // Opens Calendar for the configured account in a background tab; the page checks the account.
 async function calendar(request, account) {
   const tab = await openTab('https://calendar.google.com/calendar/u/0/r?authuser='+encodeURIComponent(account));
@@ -39,11 +56,18 @@ async function calendar(request, account) {
     let lastError;
     for (let i=0;i<30;i++) {
       const result = await page(tab.id, calendarPageOperation, {...request,expectedAccount:account}).catch(error=>({ready:false,cause:error.message}));
-      if (result.error) throw new Error(result.error);
-      if (result.ready !== false) return result;
+      if (result.error) {
+        if (result.signedOut) await signedOut();
+        throw new Error(result.error);
+      }
+      if (result.ready !== false) {
+        await chrome.action.setBadgeText({text:''}).catch(()=>{});
+        return result;
+      }
       lastError = result.cause;
       await sleep(500);
     }
+    await signedOut();
     throw new Error('Open Google Calendar with the configured account in this Chrome profile' + (lastError ? ' (last error: ' + lastError + ')' : ''));
   } finally {
     await tabsRetry(()=>chrome.tabs.remove(tab.id)).catch(()=>{});
@@ -72,7 +96,11 @@ async function run(request) {
       }
     } finally { await tabsRetry(()=>chrome.tabs.remove(tab.id)).catch(()=>{}); }
   }
-  if (!identity) throw new Error('Sign in to Gmail with the configured account in this Chrome profile');
+  if (!identity) {
+    await signedOut();
+    throw new Error('Sign in to Gmail with the configured account in this Chrome profile');
+  }
+  await chrome.action.setBadgeText({text:''}).catch(()=>{});
   if (request.action === 'identity') return {...identity,extensionVersion:chrome.runtime.getManifest().version};
   const base = new URL(identity.baseUrl);
   if (base.origin !== 'https://mail.google.com' || !/^\/mail\/u\/\d+\/$/.test(base.pathname)) throw new Error('Unsupported Gmail account URL');
@@ -251,6 +279,7 @@ async function poll() {
 }
 chrome.alarms.create('gmail-mcp-poll',{periodInMinutes:0.5});
 chrome.alarms.onAlarm.addListener(poll);
+chrome.action.onClicked.addListener(async()=>{ if (await chrome.action.getBadgeText({})) await showNotice(); });
 chrome.runtime.onStartup.addListener(poll);
 chrome.runtime.onInstalled.addListener(poll);
 poll();

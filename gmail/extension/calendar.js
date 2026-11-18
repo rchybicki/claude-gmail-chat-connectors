@@ -39,7 +39,7 @@ export async function calendarPageOperation({ action, expectedAccount, calendarI
   };
   try {
     const me = await get('calendars/primary');
-    if (String(me.id).toLowerCase() !== expectedAccount) return { error: 'Calendar account identity missing or mismatched' };
+    if (String(me.id).toLowerCase() !== expectedAccount) return { error: 'Calendar account identity missing or mismatched', signedOut: true };
     const account = expectedAccount;
     if (action === 'calendar_list') {
       const list = await getAll('users/me/calendarList', {}, 1000);
