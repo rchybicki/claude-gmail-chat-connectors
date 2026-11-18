@@ -55,7 +55,7 @@ async function signInChecked(service, signedIn) {
 function showNotice(focus) {
   return noticeOpening ??= (async()=>{
     const url = chrome.runtime.getURL('notice.html');
-    const [open] = await chrome.runtime.getContexts({contextTypes:['TAB'],documentUrls:[url]});
+    const [open] = (await chrome.runtime.getContexts?.({contextTypes:['TAB'],documentUrls:[url]})) ?? [];
     if (open) {
       if (focus) {
         await tabsRetry(()=>chrome.tabs.update(open.tabId,{active:true}));
