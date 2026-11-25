@@ -16,10 +16,11 @@ const opened=async(sent,i=0)=>{
 };
 // Runs the extension against a server that answers poll n with `answers[n](nonce,badge)`; a single answer serves one poll.
 // Waits run at once. `signedIn()` decides whether the Gmail identity check finds the account. `browser` sets the
-// toolbar title at start, the last focused window, and `openNotice`, which runs before each notice tab opens.
+// toolbar title at start, the last focused window, `openNotice`, which runs before each notice tab opens, and
+// `lookup(n)`, which runs after notice lookup n has seen the open notices and before it returns them.
 async function bridge(answers,calendarPage,settings={},gmailTabs=[{id:1}],signedIn=()=>true,browser={}) {
   answers=[answers].flat();
-  const sent=[],pageCalls=[],tabs=[],noticeTabs=[];let polls=0,done,timer,badge='',title=browser.title??'Gmail for Claude',clicked,noticeId=100;
+  const sent=[],pageCalls=[],tabs=[],noticeTabs=browser.hiddenNotice?[{tabId:99,windowId:3,active:false}]:[];let polls=0,done,timer,badge='',title=browser.title??'Gmail for Claude',clicked,messaged,noticeId=100,lookups=0;
   const noticeUrl='chrome-extension://ext/notice.html';
   const finished=new Promise(r=>done=r);
   const fetch=async(url,options={})=>{
@@ -37,21 +38,27 @@ async function bridge(answers,calendarPage,settings={},gmailTabs=[{id:1}],signed
   const opensNotice=async(url,windowId)=>{
     if(url!==noticeUrl)return;
     await browser.openNotice?.(windowId);
-    const tabId=noticeId++;noticeTabs.push({tabId,windowId});return tabId;
+    const tabId=noticeId++;noticeTabs.push({tabId,windowId,active:true});return tabId;
   };
   const chrome={runtime:{getURL:path=>path==='bridge-local.json'?'fixture-config':'chrome-extension://ext/'+path,getManifest:()=>({version:'1.0.0',action:{default_title:'Gmail for Claude'}}),
-      getContexts:async({contextTypes,documentUrls})=>contextTypes+''==='TAB'&&documentUrls+''===noticeUrl?noticeTabs.map(t=>({...t})):[],onStartup:{addListener(){}},onInstalled:{addListener(){}}},
+      getContexts:async({contextTypes,documentUrls})=>{
+        if(contextTypes+''!=='TAB'||documentUrls+''!==noticeUrl)return [];
+        const open=noticeTabs.map(({tabId,windowId})=>({tabId,windowId}));await browser.lookup?.(++lookups);return open;},onStartup:{addListener(){}},onInstalled:{addListener(){}},onMessage:{addListener(f){messaged=f;}}},
     alarms:{create(){},onAlarm:{addListener(){}}},
     action:{setBadgeText:async({text})=>{badge=text;},setBadgeBackgroundColor:async()=>{},getTitle:async()=>title,setTitle:async t=>{title=t.title;},onClicked:{addListener(f){clicked=f;}}},
     tabs:{query:async()=>gmailTabs,create:async({url,windowId})=>{const id=await opensNotice(url,windowId);tabs.push('open '+url+' in '+windowId);return {id:id??8};},
-      update:async(id,{active})=>{tabs.push('activate '+id+' '+active);},remove:async id=>{tabs.push('close '+id);}},
+      update:async(id,{active})=>{
+        tabs.push('activate '+id+' '+active);
+        const shown=noticeTabs.find(t=>t.tabId===id&&!t.active&&active);
+        if(shown){shown.active=true;setTimeout(()=>messaged('recheck',{url:noticeUrl}));}},remove:async id=>{tabs.push('close '+id);noticeTabs.splice(0,noticeTabs.length,...noticeTabs.filter(t=>t.tabId!==id));}},
     windows:{create:async({url,state,focused})=>{const id=await opensNotice(url,9);tabs.push('window '+state+' '+focused+' '+url);return {id:9,state,tabs:[{id:id??7}]};},
-      getLastFocused:async()=>browser.lastWindow??{id:3,state:'normal'},update:async(id,{focused})=>{tabs.push('focus '+id+' '+focused);}},
-    scripting:{executeScript:async({args:[args]})=>{pageCalls.push(args.action);return [{result:args.action==='identity'?signedIn()&&{account,baseUrl:'https://mail.google.com/mail/u/0/'}:calendarPage(args,pageCalls.length)}];}}};
+      getLastFocused:async()=>browser.lastWindow??{id:3,state:'normal'},
+      get:async id=>({id,state:'normal',tabs:noticeTabs.filter(t=>t.windowId===id).map(t=>({id:t.tabId,active:t.active}))}),update:async(id,{focused})=>{tabs.push('focus '+id+' '+focused);}},
+    scripting:{executeScript:async({args:[args]})=>{pageCalls.push(args.action);return [{result:args.action==='identity'?(await signedIn())&&{account,baseUrl:'https://mail.google.com/mail/u/0/'}:calendarPage(args,pageCalls.length)}];}}};
   const context={fetch,chrome,crypto:globalThis.crypto,TextEncoder,AbortSignal,URL,Blob,setTimeout:f=>setTimeout(f),gmailPageOperation(){},extractReadThread(){},prepareDraft(){},calendarPageOperation(){}};
   vm.createContext(context);vm.runInContext(source,context);
   await finished;
-  return {sent,pageCalls,tabs,badge:()=>badge,title:()=>title,click:()=>clicked(),closeNotices:()=>{noticeTabs.length=0;}};
+  return {sent,pageCalls,tabs,badge:()=>badge,title:()=>title,click:()=>clicked(),message:(m,url=noticeUrl)=>messaged(m,{url}),openNotices:()=>noticeTabs.length,closeNotices:()=>{noticeTabs.length=0;}};
 }
 const request={id:'r1',action:'identity'};
 test('a server without the key gets no key and cannot run mailbox actions',async()=>{
@@ -128,6 +135,7 @@ test('a Gmail sign-in failure marks the icon and opens one notice for many failu
   assert.equal((await opened(sent,3)).data.account,account);
   assert.equal(badge(),'','success clears the mark');
   assert.equal(title(),'Gmail for Claude');
+  assert.equal(tabs.at(-1),'close 100','success closes the notice');
 });
 test('only a Calendar page readiness timeout or another account counts as signed out; a Calendar HTTP 401 or API timeout does not',async()=>{
   const badges=[];
@@ -182,8 +190,9 @@ test('the icon focuses an open notice, opens it again after it is closed, and a 
   const pending=click();
   release();await pending;await settle();
   assert.deepEqual(notices(tabs),[notice],'the click shares the automatic open');
+  const before=tabs.length;
   await click();
-  assert.deepEqual(tabs.slice(-2),['activate 100 true','focus 3 true'],'a click focuses the open notice');
+  assert.deepEqual(tabs.slice(before,before+2),['activate 100 true','focus 3 true'],'a click focuses the open notice');
   assert.equal(notices(tabs).length,1);
   closeNotices();
   await click();
@@ -205,4 +214,132 @@ test('a notice that fails to open opens on the next failure',async()=>{
   assert.equal(attempts,3,'the first failure tried the user window and a new window');
   assert.deepEqual(notices(tabs),[notice]);
   assert.equal((await opened(sent,1)).error,gmailSignInError);
+});
+test('a click on the icon checks the signed-out services again, and when they work the mark clears and the notice closes',async()=>{
+  const {tabs,pageCalls,click,badge,title,openNotices}=await bridge([],()=>({account,calendars:[]}),{},[{id:1}],()=>true,{title:'Gmail for Claude. Sign in needed: Gmail, Calendar'});
+  await click();await settle();
+  assert.deepEqual(pageCalls,['identity','calendar_list']);
+  assert.equal(title(),'Gmail for Claude');
+  assert.equal(badge(),'');
+  assert.equal(openNotices(),0,'the notice is closed, so it does not claim Gmail is signed out');
+});
+test('the notice asks for a check when it is shown again; after a sign-in the mark clears and the notice closes',async()=>{
+  let signedIn=false;
+  const {tabs,message,badge,title,openNotices}=await bridge(signed({id:'g1',action:'identity'}),null,{},[],()=>signedIn);
+  await settle();
+  assert.deepEqual(notices(tabs),[notice]);
+  signedIn=true;
+  message('recheck','https://mail.google.com/');await settle();
+  assert.equal(title(),'Gmail for Claude. Sign in needed: Gmail','only the notice page can ask for a check');
+  signedIn=false;
+  message('recheck');await settle();
+  assert.equal(openNotices(),1,'still signed out: the notice stays');
+  assert.equal(title(),'Gmail for Claude. Sign in needed: Gmail');
+  signedIn=true;
+  message('recheck');await settle();
+  assert.equal(openNotices(),0);
+  assert.equal(badge(),'');
+  assert.equal(title(),'Gmail for Claude');
+});
+const latch=()=>{let release;const wait=new Promise(r=>release=r);return {wait,release};};
+function slowCheck(n,state) {
+  const reached=latch(),held=latch();let calls=0;
+  return {reached:reached.wait,release:held.release,signedIn:async()=>{
+    const up=state.up;
+    if(++calls===n){reached.release();await held.wait;}
+    return up;
+  }};
+}
+test('a Claude request that started before a sign-in and fails after a successful check does not bring the mark back',async()=>{
+  const state={up:false},slow=slowCheck(40,state);
+  const {sent,message,badge,title,openNotices}=await bridge(signed({id:'g1',action:'identity'}),null,{},[],slow.signedIn,{title:'Gmail for Claude. Sign in needed: Gmail'});
+  await slow.reached;
+  state.up=true;
+  message('recheck');await settle();
+  slow.release();await settle();
+  assert.deepEqual(await opened(sent),{id:'g1',error:gmailSignInError},'the request still fails, as its own check did');
+  assert.equal(badge(),'','the check that started later decides');
+  assert.equal(title(),'Gmail for Claude');
+  assert.equal(openNotices(),0);
+});
+test('a check that started before a sign-in and fails after a successful Claude request does not bring the mark back',async()=>{
+  const state={up:false},slow=slowCheck(40,state),arrive=latch();
+  const answer=async nonce=>{await arrive.wait;return signed({id:'g1',action:'identity'})(nonce);};
+  const {sent,click,badge,title,openNotices}=await bridge(answer,null,{},[],slow.signedIn,{title:'Gmail for Claude. Sign in needed: Gmail'});
+  const clicking=click();
+  await slow.reached;
+  state.up=true;
+  arrive.release();await settle();
+  slow.release();await clicking;await settle();
+  assert.equal((await opened(sent)).data.account,account);
+  assert.equal(badge(),'');
+  assert.equal(title(),'Gmail for Claude');
+  assert.equal(openNotices(),0,'the notice from the click closes and no new one opens');
+});
+test('a check asked for while another check runs is not lost',async()=>{
+  const state={up:false},slow=slowCheck(40,state);
+  const {click,message,badge,openNotices}=await bridge([],null,{},[],slow.signedIn,{title:'Gmail for Claude. Sign in needed: Gmail'});
+  const clicking=click();
+  await slow.reached;
+  state.up=true;
+  message('recheck');message('recheck');
+  slow.release();await clicking;await settle();
+  assert.equal(badge(),'');
+  assert.equal(openNotices(),0);
+});
+test('a notice that is closing after Gmail recovers stays for a Calendar failure that comes during the close',async()=>{
+  let gmailUp=false;const close=latch();
+  const answers=[signed({id:'g1',action:'identity'}),nonce=>{gmailUp=true;return signed({id:'g2',action:'identity'})(nonce);},
+    signed({id:'c1',action:'calendar_list'}),async nonce=>{close.release();await settle();return signed({id:'c2',action:'calendar_list'})(nonce);}];
+  const {sent,tabs,badge,title,openNotices}=await bridge(answers,()=>mismatch,{},[],()=>gmailUp,{lookup:n=>n===2&&close.wait});
+  await settle();
+  assert.equal((await opened(sent,1)).data.account,account);
+  for(const i of [2,3]) assert.equal((await opened(sent,i)).error,'Calendar account identity missing or mismatched');
+  assert.equal(badge(),'!');
+  assert.equal(title(),'Gmail for Claude. Sign in needed: Calendar');
+  assert.equal(openNotices(),1,'the notice stays open for Calendar');
+  assert.deepEqual(notices(tabs),[notice]);
+});
+test('one click on a hidden notice runs one check, and a Claude request during the check answers without waiting for it',async()=>{
+  const state={up:false},slow=slowCheck(1,state),arrive=latch();
+  const answer=async nonce=>{await arrive.wait;return signed({id:'c1',action:'calendar_list'})(nonce);};
+  const {sent,tabs,click}=await bridge(answer,()=>({account,calendars:[]}),{},[],slow.signedIn,{title:'Gmail for Claude. Sign in needed: Gmail',hiddenNotice:true});
+  const clicking=click();
+  await slow.reached;
+  arrive.release();await settle();
+  assert.equal(sent.filter(s=>s.url.endsWith('/response')).length,1,'Claude has its answer while the check still runs');
+  assert.deepEqual(await opened(sent),{id:'c1',data:{account,calendars:[]}});
+  slow.release();await clicking;await new Promise(r=>setTimeout(r,200));
+  assert.equal(tabs.filter(t=>/^(open|window) .*mail\.google\.com/.test(t)).length,1,'the click and the notice coming into view share one Gmail check');
+});
+function noticePage(config) {
+  const elements={},listeners={},messages=[];
+  const document={visibilityState:'hidden',getElementById:id=>elements[id]??={id,remove(){delete elements[id];}},addEventListener:(type,f)=>{listeners[type]=f;}};
+  const context={document,fetch:async()=>{if(!config)throw new Error('missing');return {json:async()=>config};},chrome:{runtime:{getURL:p=>'chrome-extension://ext/'+p,sendMessage:async m=>{messages.push(m);}}},URLSearchParams,encodeURIComponent};
+  vm.createContext(context);
+  const source=readFileSync(new URL('../gmail/extension/notice.js',import.meta.url),'utf8');
+  return {done:vm.runInContext('(async()=>{'+source+'\n})()',context),elements,document,listeners,messages};
+}
+test('the notice Sign in button starts a Google sign-in for the configured account, not the account Chrome uses first',async()=>{
+  const page=noticePage({account});
+  await page.done;
+  const link=new URL(page.elements.signin.href);
+  assert.equal(link.origin+link.pathname,'https://accounts.google.com/AddSession');
+  assert.equal(link.searchParams.get('Email'),account);
+  assert.equal(link.searchParams.get('continue'),'https://mail.google.com/mail/u/?authuser='+encodeURIComponent(account));
+  assert.equal(page.elements.account.textContent,account);
+});
+test('the notice asks the extension to check again each time it comes back into view',async()=>{
+  const page=noticePage(null);
+  await page.done;
+  assert.equal(page.elements.signin,undefined,'without the setup file there is no Sign in button');
+  page.listeners.visibilitychange();
+  assert.deepEqual(page.messages,[],'a hidden notice asks for nothing');
+  page.document.visibilityState='visible';page.listeners.visibilitychange();
+  assert.deepEqual(page.messages,['recheck']);
+});
+test('the notice text does not name one service, because either Gmail or Calendar can be the signed-out one',()=>{
+  const html=readFileSync(new URL('../gmail/extension/notice.html',import.meta.url),'utf8');
+  assert.doesNotMatch(html,/cannot reach Gmail/);
+  assert.match(html,/id="signin"[^>]*target="_blank"/,'the sign-in opens in a new tab, so the notice stays and checks again when the user comes back');
 });
